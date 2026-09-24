@@ -33,8 +33,11 @@ const browser = await chromium.launch({
 const failures = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const openContexts = new Set();
+
 async function openGame({ settings = {}, viewport = { width: 960, height: 540 }, touch = false, name }) {
   const context = await browser.newContext({ viewport, hasTouch: touch, isMobile: touch, deviceScaleFactor: 1 });
+  openContexts.add(context);
   const page = await context.newPage();
   page.setDefaultTimeout(240000);
   const errors = [];
@@ -108,6 +111,10 @@ async function run(name, fn) {
   } catch (e) {
     failures.push(`${name}: ${e.message}`);
     console.log(`FAIL ${name}: ${e.message}`);
+  } finally {
+    // A page left running keeps rendering in software and slows down every later scenario.
+    for (const c of openContexts) await c.close().catch(() => {});
+    openContexts.clear();
   }
 }
 
@@ -218,17 +225,47 @@ await run('night-free', async () => {
   await page.keyboard.up('KeyW');
   await shot(page, '08-night.png');
   console.log('night', await state(page));
-  // Handbrake drift scores points in free mode.
+  // Handbrake drift scores points in free mode. Done on an empty straight: any contact
+  // (e.g. with traffic) correctly cancels the running combo and would make the check random.
+  await page.evaluate(() => {
+    const g = window.__nordkamm;
+    g.ai.forEach((a) => (a.model.root.visible = false));
+    g.ai = [];
+    const tr = g.data.track;
+    let best = 0;
+    for (let s = 300; s < tr.length; s += 20) {
+      let k = 0;
+      for (let d = 0; d < 200; d += 10) k = Math.max(k, Math.abs(tr.curvatureAt(s + d)));
+      if (k < 0.0015) {
+        best = s;
+        break;
+      }
+    }
+    const p = tr.pointAt(best, -3, {});
+    const q = tr.nearest(p.x, p.z, p.index, {});
+    g.vehicle.reset(p.x, g.data.groundHeight(p.x, p.z, q), p.z, p.heading);
+    g.vehicle.vx = Math.sin(p.heading) * 30;
+    g.vehicle.vz = Math.cos(p.heading) * 30;
+    g.vehicle.gear = 3;
+  });
+  const sample = () =>
+    page.evaluate(() => {
+      const g = window.__nordkamm;
+      return { angle: Math.round(Math.abs(g.vehicle.driftAngle) * 57.3), speed: Math.round(g.vehicle.speed * 3.6), points: Math.round(g.drift.points + g.drift.total), hand: g.input.state.handbrake, steer: g.input.state.steer };
+    });
+  let drift = 0;
   await page.keyboard.down('KeyW');
-  await page.keyboard.down('KeyD');
+  await page.keyboard.down('KeyA');
   await page.keyboard.down('Space');
-  await sim(page, 0.8);
-  await page.keyboard.up('Space');
-  await sim(page, 1.2);
-  await page.keyboard.up('KeyD');
+  for (let i = 0; i < 10; i++) {
+    if (i === 4) await page.keyboard.up('Space');
+    await sim(page, 0.2);
+    const smp = await sample();
+    if (process.env.VERBOSE) console.log(smp);
+    drift = Math.max(drift, smp.points);
+  }
+  await page.keyboard.up('KeyA');
   await page.keyboard.up('KeyW');
-  await sim(page, 1.5);
-  const drift = await page.evaluate(() => Math.round(window.__nordkamm.drift.total + window.__nordkamm.drift.points));
   console.log('drift points', drift);
   if (drift <= 0) throw new Error('drift scoring did not register');
   if (errors.length) throw new Error(errors.join('\n'));

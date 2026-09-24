@@ -175,13 +175,14 @@ await run('finish', async () => {
   await page.click('#start-btn');
   await waitRunning(page);
   await page.keyboard.down('KeyW');
-  await sim(page, 3);
+  await sim(page, 5);
   // Jump to the end of the lap: every sector counts as visited, car placed before the line.
   await page.evaluate(() => {
     const g = window.__nordkamm;
     const me = g.race.entries[0];
     if (me.lap !== 1) throw new Error(`expected lap 1 after the start, got ${me.lap}`);
     me.mask = 0x3ff;
+    me.prevS = null; // a teleport back over the line must not count as driving backwards
     const tr = g.data.track;
     const p = tr.pointAt(tr.startS - 60, 0, {});
     const q = tr.nearest(p.x, p.z, p.index, {});

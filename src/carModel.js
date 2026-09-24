@@ -250,7 +250,7 @@ function buildShared() {
 function sharedMaterials() {
   if (shared.materials) return shared.materials;
   shared.materials = {
-    glass: new THREE.MeshPhysicalMaterial({ color: '#0e1318', metalness: 0.2, roughness: 0.04, transparent: true, opacity: 0.55, envMapIntensity: 1.8, clearcoat: 1 }),
+    glass: new THREE.MeshPhysicalMaterial({ color: '#16202a', metalness: 0.35, roughness: 0.03, transparent: true, opacity: 0.72, envMapIntensity: 2.4, clearcoat: 1 }),
     glassDark: new THREE.MeshPhysicalMaterial({ color: '#06080b', metalness: 0.3, roughness: 0.05, envMapIntensity: 1.6, clearcoat: 1 }),
     trim: new THREE.MeshStandardMaterial({ color: '#141518', roughness: 0.55, metalness: 0.2 }),
     carbon: new THREE.MeshStandardMaterial({ color: '#1b1d21', roughness: 0.3, metalness: 0.5 }),
@@ -317,7 +317,7 @@ function mesh(geo, mat, cast = true) {
 }
 
 export class CarModel {
-  constructor({ color = '#c1121f', stripe = '#f4f4f0', number = 7, plate = 'NK·GT 7', detail = 'high', glassOpacity = 0.55 } = {}) {
+  constructor({ color = '#c1121f', stripe = '#f4f4f0', number = 7, plate = 'NK·GT 7', detail = 'high', glassOpacity = 0.72 } = {}) {
     if (!shared) shared = buildShared();
     const M = sharedMaterials();
     this.detail = detail;
@@ -406,13 +406,13 @@ export class CarModel {
     const housing = shared.housing || (shared.housing = new THREE.MeshStandardMaterial({ name: 'housing', color: '#0c0d10', roughness: 0.2, metalness: 0.6 }));
     for (const sd of [1, -1]) {
       const h = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), housing);
-      h.scale.set(0.24, 0.06, 0.2);
-      h.position.set(sd * 0.55, 0.585, 1.98);
+      h.scale.set(0.2, 0.05, 0.17);
+      h.position.set(sd * 0.55, 0.588, 1.99);
       h.rotation.set(0.32, sd * 0.35, 0);
       c.add(h);
       const lens = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), this.headMat);
-      lens.scale.set(0.07, 0.045, 0.05);
-      lens.position.set(sd * 0.47, 0.6, 2.05);
+      lens.scale.set(0.065, 0.04, 0.05);
+      lens.position.set(sd * 0.49, 0.6, 2.05);
       c.add(lens);
       const lens2 = lens.clone();
       lens2.position.set(sd * 0.62, 0.59, 2.0);

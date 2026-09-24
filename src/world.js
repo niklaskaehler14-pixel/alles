@@ -1021,7 +1021,7 @@ export class WorldView {
     this.scene.environmentIntensity = p.env;
     this.night = p.night;
     this.bulbMaterial.emissiveIntensity = p.night > 0 ? 3 + p.night * 5 : 0;
-    this.poolMaterial.opacity = p.night * 0.2;
+    this.poolMaterial.opacity = p.night * 0.15;
     for (const m of this.windowMaterials) m.emissiveIntensity = Math.pow(p.night, 1.6) * 0.95;
     for (const m of this.billboardFaces || []) m.emissiveIntensity = p.night * 0.6;
     this.starMaterial.opacity = p.night > 0.9 ? 0.9 : 0;

@@ -250,7 +250,7 @@ function buildShared() {
 function sharedMaterials() {
   if (shared.materials) return shared.materials;
   shared.materials = {
-    glass: new THREE.MeshPhysicalMaterial({ color: '#16202a', metalness: 0.35, roughness: 0.03, transparent: true, opacity: 0.72, envMapIntensity: 2.4, clearcoat: 1 }),
+    glass: new THREE.MeshPhysicalMaterial({ color: '#16202a', metalness: 0.3, roughness: 0.07, transparent: true, opacity: 0.72, envMapIntensity: 2.2, clearcoat: 0.6, clearcoatRoughness: 0.08 }),
     glassDark: new THREE.MeshPhysicalMaterial({ color: '#06080b', metalness: 0.3, roughness: 0.05, envMapIntensity: 1.6, clearcoat: 1 }),
     trim: new THREE.MeshStandardMaterial({ color: '#141518', roughness: 0.55, metalness: 0.2 }),
     carbon: new THREE.MeshStandardMaterial({ color: '#1b1d21', roughness: 0.3, metalness: 0.5 }),
@@ -329,7 +329,7 @@ export class CarModel {
     this.tilt.add(this.chassis);
 
     const paintTex = TX.carPaintTexture(color, stripe, number);
-    this.paint = new THREE.MeshPhysicalMaterial({ name: 'paint', map: paintTex, metalness: 0.55, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.035, envMapIntensity: 1.25 });
+    this.paint = new THREE.MeshPhysicalMaterial({ name: 'paint', map: paintTex, metalness: 0.35, roughness: 0.4, specularIntensity: 0.7, clearcoat: 0.8, clearcoatRoughness: 0.09, envMapIntensity: 1.2 });
     const glass = detail === 'high' ? M.glass.clone() : M.glassDark;
     if (detail === 'high') glass.opacity = glassOpacity;
     this.glass = glass;

@@ -976,6 +976,12 @@ export class WorldView {
     this.envScene = new THREE.Scene();
     this.envSky = new Sky();
     this.envSky.scale.setScalar(80);
+    // The sun is already a directional light; a sun disc in the reflections would double it.
+    // The glow around a low sun is clamped too, so glossy paint does not turn into a hot spot.
+    if (this.envSky.material.uniforms.showSunDisc) this.envSky.material.uniforms.showSunDisc.value = 0;
+    this.envSky.material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <tonemapping_fragment>', 'gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(2.5));\n#include <tonemapping_fragment>');
+    };
     this.envScene.add(this.envSky);
     this.envGround = new THREE.Mesh(
       new THREE.SphereGeometry(40, 32, 12, 0, Math.PI * 2, Math.PI / 2 + 0.03, Math.PI / 2 - 0.03),

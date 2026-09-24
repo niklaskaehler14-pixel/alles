@@ -729,7 +729,7 @@ class Game {
     for (const m of this.rivalModels) m.setLights({ headlights: night > 0 });
     if (this.bloom) {
       // Bloom only for real light sources: sunlit paint and facades stay below the threshold.
-      this.bloom.threshold = night > 0.9 ? 1.0 : night > 0 ? 2.6 : 3.6;
+      this.bloom.threshold = night > 0.9 ? 1.0 : night > 0 ? 4 : 5;
       this.bloom.strength = 0.28 + night * 0.35;
     }
   }

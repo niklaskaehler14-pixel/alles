@@ -1,0 +1,25 @@
+{
+  "name": "nordkamm-gt",
+  "version": "1.0.0",
+  "description": "3D-Open-World-Rennspiel im Browser (Three.js)",
+  "scripts": {
+    "test": "node tests/physics.test.mjs && node tests/world.test.mjs && node tests/audio.mjs",
+    "test:browser": "node tests/e2e.mjs",
+    "build": "node tools/build-artifact.mjs",
+    "serve": "npx http-server -c-1 -p 8080 ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/niklaskaehler14-pixel/alles.git"
+  },
+  "bugs": {
+    "url": "https://github.com/niklaskaehler14-pixel/alles/issues"
+  },
+  "homepage": "https://github.com/niklaskaehler14-pixel/alles#readme",
+  "devDependencies": {
+    "playwright": "^1.56.1",
+    "three": "^0.186.1"
+  },
+  "type": "module",
+  "private": true
+}

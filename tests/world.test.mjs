@@ -36,6 +36,35 @@ for (const b of world.colliders.boxes) {
 const again = new WorldData().generateAll();
 assert.equal(again.trees.length, world.trees.length);
 assert.equal(again.heightfield.heights[12345], world.heightfield.heights[12345]);
+// Open-world layout: every activity exists and the off-road runs are drivable.
+assert.equal(world.routes.length, 5);
+assert.equal(world.driftZones.length, 3);
+assert.equal(world.speedTraps.length, 4);
+assert.equal(world.ramps.length, 4);
+for (const r of world.routes) {
+  assert.ok(r.checkpoints.length >= 5, `${r.name} has checkpoints`);
+  for (let i = 1; i < r.points.length; i++) {
+    const a = r.points[i - 1];
+    const b = r.points[i];
+    if (a.road && b.road) continue; // road legs follow the circuit
+    const d = Math.hypot(b.x - a.x, b.z - a.z);
+    let prev = world.heightfield.get(a.x, a.z);
+    for (let t = 5; t <= d; t += 5) {
+      const h = world.heightfield.get(a.x + ((b.x - a.x) * t) / d, a.z + ((b.z - a.z) * t) / d);
+      assert.ok(h > WORLD.waterLevel + 1, `${r.name} leg ${i} runs through water`);
+      // The lake run ends with a steep drop down to the beach, everything else stays moderate.
+      assert.ok(Math.abs(h - prev) / 5 < (r.id === 'run-lake' ? 0.45 : 0.3), `${r.name} leg ${i} too steep`);
+      prev = h;
+    }
+  }
+}
+for (const r of world.ramps) {
+  const fx = Math.sin(r.yaw);
+  const fz = Math.cos(r.yaw);
+  const lip = world.groundHeight(r.x + fx * (r.length - 0.2), r.z + fz * (r.length - 0.2), null);
+  const base = world.heightfield.get(r.x + fx * (r.length - 0.2), r.z + fz * (r.length - 0.2));
+  assert.ok(lip - base > 2.3, `${r.name} lip is raised`);
+}
 console.log('world checks passed');
 
 // --- AI race: 5 cars, 2 laps

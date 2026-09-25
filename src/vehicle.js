@@ -16,7 +16,7 @@ export const CAR_SPEC = {
   track: 1.62,
   wheelRadius: 0.34,
   cdA: 0.64,
-  clA: 0.95,
+  clA: 1.5,
   rollRes: 0.014,
   gears: [3.3, 2.13, 1.56, 1.24, 1.02, 0.84],
   reverse: 3.2,
@@ -38,8 +38,8 @@ export const CAR_SPEC = {
     [7200, 405],
     [7600, 320],
   ],
-  brakeForce: 15500,
-  handbrakeForce: 5200,
+  brakeForce: 24000,
+  handbrakeForce: 6200,
   tireB: 9.5,
   tireC: 1.55,
   muFront: 1.0,
@@ -50,10 +50,10 @@ export const CAR_SPEC = {
 
 // Surface grip and rolling resistance by surface id (see WorldData.surfaceAt).
 export const SURFACES = [
-  { name: 'asphalt', mu: 1.12, roll: 1, rumble: 0 },
-  { name: 'grass', mu: 0.68, roll: 4.5, rumble: 1 },
-  { name: 'gravel', mu: 0.8, roll: 3, rumble: 0.7 },
-  { name: 'sand', mu: 0.55, roll: 7, rumble: 0.8 },
+  { name: 'asphalt', mu: 1.2, roll: 1, rumble: 0 },
+  { name: 'grass', mu: 0.74, roll: 3.4, rumble: 1 },
+  { name: 'gravel', mu: 0.85, roll: 2.6, rumble: 0.7 },
+  { name: 'sand', mu: 0.6, roll: 6, rumble: 0.8 },
 ];
 
 function torqueAt(curve, rpm) {
@@ -109,6 +109,9 @@ export class Vehicle {
     this.airTime = 0;
     this.groundY = y;
     this.renderY = y;
+    this.gradeF = 0;
+    this.gradeL = 0;
+    this.abs = 0;
     this.axSmooth = 0;
     this.ayLocal = 0;
     this.axLocal = 0;
@@ -187,9 +190,12 @@ export class Vehicle {
     // while crests taken fast still lift the car off.
     const uNow = this.vx * sn + this.vz * cs;
     const vNow = this.vx * cs - this.vz * sn;
-    const gradeF = clamp(slopeF, -0.2, 0.2);
-    const gradeL = clamp(slopeL, -0.2, 0.2);
-    const slopeVel = gradeF * uNow + gradeL * vNow;
+    // Low-pass the grade: a kerb or step lasts a few centimetres and must not act like a ramp,
+    // a real ramp or crest lasts long enough to pass the filter.
+    const kGrade = 1 - Math.exp(-dt / 0.06);
+    this.gradeF += (clamp(slopeF, -0.5, 0.5) - this.gradeF) * kGrade;
+    this.gradeL += (clamp(slopeL, -0.3, 0.3) - this.gradeL) * kGrade;
+    const slopeVel = this.gradeF * uNow + this.gradeL * vNow;
     this.groundY = groundY;
     const wasGround = this.onGround;
     const vyBefore = this.vy;
@@ -260,19 +266,22 @@ export class Vehicle {
       throttleIn = brakeIn;
       brakeIn = t;
     }
+    // The brake always wins over the throttle while rolling (like brake override in road cars).
+    if (brakeIn > 0.05 && Math.abs(u) > 1) throttleIn = 0;
     this.throttle = approach(this.throttle, throttleIn, dt * 8);
-    this.brake = approach(this.brake, brakeIn, dt * 10);
+    this.brake = approach(this.brake, brakeIn, dt * (brakeIn > this.brake ? 14 : 10));
     this.handbrake = hand;
 
     // --- steering: rate-limited for digital input, speed sensitive range
     const steerTarget = clamp(input.steer || 0, -1, 1);
     const fast = Math.abs(this.forwardSpeed);
-    const rate = (input.analogSteer ? 10 : Math.sign(steerTarget) !== Math.sign(this.steerInput) || steerTarget === 0 ? 6 : 3.2) / (1 + fast / 35);
+    const returning = Math.sign(steerTarget) !== Math.sign(this.steerInput) || steerTarget === 0;
+    const rate = input.analogSteer ? 14 : returning ? 9 / (1 + fast / 60) : 5.5 / (1 + fast / 45);
     this.steerInput = approach(this.steerInput, steerTarget, rate * dt);
     const beta = u > 4 ? Math.atan2(v, u) : 0;
     // Speed-sensitive lock: roughly the angle that uses the available grip, plus room to counter-steer.
     const uSteer = Math.max(Math.abs(u), 1);
-    const maxSteer = clamp((L * 12) / (uSteer * uSteer) + 0.06, 0.05, s.steerMax);
+    const maxSteer = clamp((L * 13) / (uSteer * uSteer) + 0.07, 0.06, s.steerMax);
     let delta = -this.steerInput * maxSteer + clamp(beta, -0.5, 0.5) * s.assist;
     delta = clamp(delta, -s.steerMax, s.steerMax);
     this.steerAngle = delta;
@@ -352,12 +361,16 @@ export class Vehicle {
       const brakeF = this.brake * s.brakeForce;
       const maxF = muF * Wf;
       const maxR = muR * Wr;
-      let FxF = -sgn * brakeF * 0.7;
+      let FxF = -sgn * brakeF * 0.66;
       // Brake-force distribution keeps the rear axle below its limit (stable under braking).
-      const rearBrake = Math.min(brakeF * 0.3, maxR * 0.55);
+      const rearBrake = Math.min(brakeF * 0.34, maxR * 0.72);
       let FxR = driveForce - sgn * rearBrake - sgn * hand * s.handbrakeForce;
       this.lockup = 0;
-      if (Math.abs(FxF) > maxF * 0.97) FxF = Math.sign(FxF) * maxF * 0.97; // ABS
+      this.abs = 0;
+      if (Math.abs(FxF) > maxF * 0.99) {
+        FxF = Math.sign(FxF) * maxF * 0.99; // ABS keeps the fronts at the grip limit
+        if (Math.abs(u) > 4) this.abs = 1;
+      }
       this.wheelspin = 0;
       if (Math.abs(FxR) > maxR) {
         const excess = (Math.abs(FxR) - maxR) / maxR;
@@ -372,7 +385,7 @@ export class Vehicle {
       const alphaF = delta - Math.atan2(v + s.a * r, uAbs);
       const alphaR = -Math.atan2(v - s.b * r, uAbs);
       const circF = Math.sqrt(Math.max(0, 1 - (FxF / maxF) ** 2));
-      const rearGrip = (hand ? 0.42 : 1) * (1 - this.wheelspin * 0.55);
+      const rearGrip = (hand ? 0.36 : 1) * (1 - this.wheelspin * 0.55);
       const circR = Math.sqrt(Math.max(0, 1 - (FxR / maxR) ** 2));
       const reversing = u < -0.5;
       const FyF = reversing ? 0 : tireForce(alphaF, maxF, s.tireB, s.tireC) * circF;
@@ -453,7 +466,7 @@ export class Vehicle {
     this.z += this.vz * dt;
 
     // --- cosmetic suspension (sprung body pitch/roll) and wheel rotation
-    const targetPitch = clamp(-this.axSmooth * 0.0075, -0.07, 0.07);
+    const targetPitch = clamp(-this.axSmooth * 0.0085, -0.07, 0.09);
     const targetRoll = clamp(this.ayLocal * 0.0085, -0.08, 0.08);
     this.susPitchVel += ((targetPitch - this.susPitch) * 140 - this.susPitchVel * 14) * dt;
     this.susPitch += this.susPitchVel * dt;

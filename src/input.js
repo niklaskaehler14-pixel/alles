@@ -87,7 +87,62 @@ export class Input {
       el.addEventListener('pointercancel', off);
       el.addEventListener('lostpointercapture', off);
     };
-    root.querySelectorAll('[data-hold]').forEach((el) => holdButton(el, el.dataset.hold));
+    // Pedals share one touch zone: sliding the thumb from gas to brake switches pedals
+    // (a per-button capture would keep the gas pressed and never register the brake).
+    const zone = root.querySelector('.pedals');
+    if (zone) {
+      const pedals = [...zone.querySelectorAll('[data-hold]')];
+      const pointers = new Map();
+      const keyAt = (x, y) => {
+        let best = null;
+        let bestD = 26; // px of slack around each pedal
+        for (const el of pedals) {
+          const r = el.getBoundingClientRect();
+          const dx = Math.max(r.left - x, 0, x - r.right);
+          const dy = Math.max(r.top - y, 0, y - r.bottom);
+          const d = Math.hypot(dx, dy);
+          if (d < bestD) {
+            bestD = d;
+            best = el.dataset.hold;
+          }
+        }
+        return best;
+      };
+      const refresh = () => {
+        const held = new Set(pointers.values());
+        for (const el of pedals) {
+          const on = held.has(el.dataset.hold);
+          this.touch[el.dataset.hold] = on;
+          el.classList.toggle('is-down', on);
+        }
+      };
+      zone.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.usingTouch = true;
+        try {
+          zone.setPointerCapture(e.pointerId);
+        } catch {
+          /* synthetic events have no capturable pointer */
+        }
+        pointers.set(e.pointerId, keyAt(e.clientX, e.clientY));
+        refresh();
+      });
+      zone.addEventListener('pointermove', (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, keyAt(e.clientX, e.clientY));
+        refresh();
+      });
+      const release = (e) => {
+        pointers.delete(e.pointerId);
+        refresh();
+      };
+      zone.addEventListener('pointerup', release);
+      zone.addEventListener('pointercancel', release);
+      zone.addEventListener('lostpointercapture', release);
+    }
+    root.querySelectorAll('[data-hold]').forEach((el) => {
+      if (!zone || !zone.contains(el)) holdButton(el, el.dataset.hold);
+    });
     root.querySelectorAll('[data-tap]').forEach((el) => {
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault();

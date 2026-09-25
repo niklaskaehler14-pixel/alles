@@ -372,6 +372,12 @@ export class GameAudio {
     this.#tone({ freq: high ? 1320 : 660, duration: high ? 0.6 : 0.25, gain: 0.28, type: 'square' });
   }
 
+  // Speed camera: a sharp shutter click with a short electronic chirp.
+  shutter() {
+    this.#burst({ duration: 0.06, gain: 0.35, type: 'highpass', freq: 3000, q: 0.7 });
+    this.#tone({ freq: 2400, endFreq: 1800, duration: 0.12, gain: 0.08, type: 'square', when: 0.02 });
+  }
+
   click() {
     this.#tone({ freq: 1800, duration: 0.04, gain: 0.08, type: 'triangle' });
   }
@@ -418,7 +424,10 @@ export class GameAudio {
 
     const onAsphalt = car.surfaceMix < 1.5;
     const skid = car.onGround ? car.skid : 0;
-    set(this.squealGain.gain, opts.paused ? 0 : onAsphalt ? Math.pow(skid, 1.4) * 0.3 : 0, 0.05);
+    // ABS: a pulsing scrub on hard braking so the brakes can be heard working.
+    const absOn = car.abs && car.onGround && speed > 5;
+    const absPulse = absOn ? 0.09 + 0.05 * Math.sin(performance.now() * 0.1) : 0;
+    set(this.squealGain.gain, opts.paused ? 0 : onAsphalt ? Math.max(Math.pow(skid, 1.4) * 0.3, absPulse) : 0, 0.03);
     set(this.squealTone.frequency, 650 + skid * 180 + Math.random() * 20, 0.05);
     const sn = clamp(speed / 70, 0, 1);
     set(this.rollGain.gain, opts.paused || !car.onGround ? 0 : sn * (onAsphalt ? 0.1 : 0.05) * (interior ? 1.4 : 1), 0.06);

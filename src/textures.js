@@ -2,6 +2,19 @@
 import * as THREE from 'three';
 import { mulberry32 } from './noise.js';
 
+// Older Safari versions lack roundRect; a simple fallback keeps the textures working.
+if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function roundRect(x, y, w, h, r) {
+    const rad = Math.min(Array.isArray(r) ? r[0] : r || 0, w / 2, h / 2);
+    this.moveTo(x + rad, y);
+    this.arcTo(x + w, y, x + w, y + h, rad);
+    this.arcTo(x + w, y + h, x, y + h, rad);
+    this.arcTo(x, y + h, x, y, rad);
+    this.arcTo(x, y, x + w, y, rad);
+    this.closePath();
+  };
+}
+
 function canvas(w, h) {
   const c = document.createElement('canvas');
   c.width = w;
@@ -401,30 +414,220 @@ export function smokeTexture() {
 }
 
 export function plateTexture(text) {
-  const c = canvas(256, 64);
+  // 520 x 110 mm plate at 1 px/mm-ish: sharp enough for close-ups.
+  const W = 1024;
+  const H = 224;
+  const c = canvas(W, H);
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#f4f4f0';
-  ctx.fillRect(0, 0, 256, 64);
+  ctx.beginPath();
+  ctx.roundRect(4, 4, W - 8, H - 8, 18);
+  ctx.fill();
   ctx.fillStyle = '#1f3d99';
-  ctx.fillRect(0, 0, 26, 64);
-  ctx.strokeStyle = '#111';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(2, 2, 252, 60);
-  ctx.fillStyle = '#111';
-  ctx.font = '700 40px "Chivo Mono", monospace';
+  ctx.beginPath();
+  ctx.roundRect(4, 4, 96, H - 8, [18, 0, 0, 18]);
+  ctx.fill();
+  ctx.fillStyle = '#f5d000';
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(52 + Math.cos(a) * 24, 76 + Math.sin(a) * 24, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#f4f4f0';
+  ctx.font = '700 44px "Barlow", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 140, 34);
+  ctx.fillText('D', 52, 170);
+  ctx.strokeStyle = '#141414';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.roundRect(8, 8, W - 16, H - 16, 16);
+  ctx.stroke();
+  ctx.fillStyle = '#111';
+  ctx.font = '700 150px "Chivo Mono", ui-monospace, monospace';
+  ctx.fillText(text, 560, 122, 860);
+  return finish(c, { repeat: false, aniso: 8 });
+}
+
+// Headlight unit seen from the front: swept housing, two projectors and an LED signature.
+// Outer edge of the car is on the right of the texture.
+export function headlightTextures() {
+  const W = 512;
+  const H = 256;
+  const base = canvas(W, H);
+  const emis = canvas(W, H);
+  const b = base.getContext('2d');
+  const e = emis.getContext('2d');
+  const shape = (ctx) => {
+    ctx.beginPath();
+    ctx.moveTo(18, 200);
+    ctx.quadraticCurveTo(40, 60, 150, 40);
+    ctx.lineTo(494, 14);
+    ctx.quadraticCurveTo(506, 90, 470, 150);
+    ctx.quadraticCurveTo(360, 240, 60, 236);
+    ctx.quadraticCurveTo(22, 234, 18, 200);
+    ctx.closePath();
+  };
+  shape(b);
+  const g = b.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#1b2026');
+  g.addColorStop(1, '#07090b');
+  b.fillStyle = g;
+  b.fill();
+  b.lineWidth = 6;
+  b.strokeStyle = '#a7b0ba';
+  b.stroke();
+  const projector = (ctx, x, y, r, glow) => {
+    const rg = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+    rg.addColorStop(0, glow ? '#ffffff' : '#f2f6fa');
+    rg.addColorStop(0.55, glow ? '#e8f0ff' : '#aeb8c4');
+    rg.addColorStop(1, glow ? '#7a8aa0' : '#3a424c');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  projector(b, 200, 118, 50, false);
+  projector(b, 330, 104, 44, false);
+  b.strokeStyle = '#cfd6de';
+  b.lineWidth = 5;
+  for (const [x, y, r] of [
+    [200, 118, 54],
+    [330, 104, 48],
+  ]) {
+    b.beginPath();
+    b.arc(x, y, r, 0, Math.PI * 2);
+    b.stroke();
+  }
+  // LED daytime running light along the lower edge
+  const drl = (ctx, color, width) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(60, 212);
+    ctx.quadraticCurveTo(300, 206, 452, 140);
+    ctx.stroke();
+  };
+  drl(b, '#f4f8ff', 14);
+  // Emission: projectors and DRL
+  e.fillStyle = '#000';
+  e.fillRect(0, 0, W, H);
+  projector(e, 200, 118, 42, true);
+  projector(e, 330, 104, 37, true);
+  drl(e, '#ffffff', 16);
+  // Alpha comes from the base canvas; the emissive map must not glow outside the shape.
+  return { map: finish(base, { repeat: false }), emissive: finish(emis, { repeat: false }) };
+}
+
+// Full-width tail light bar with larger end sections (seen from behind).
+export function tailLightTextures() {
+  const W = 1024;
+  const H = 128;
+  const base = canvas(W, H);
+  const emis = canvas(W, H);
+  const b = base.getContext('2d');
+  const e = emis.getContext('2d');
+  const shape = (ctx) => {
+    ctx.beginPath();
+    ctx.moveTo(10, 20);
+    ctx.lineTo(1014, 20);
+    ctx.quadraticCurveTo(1022, 70, 990, 118);
+    ctx.lineTo(820, 118);
+    ctx.lineTo(760, 78);
+    ctx.lineTo(264, 78);
+    ctx.lineTo(204, 118);
+    ctx.lineTo(34, 118);
+    ctx.quadraticCurveTo(2, 70, 10, 20);
+    ctx.closePath();
+  };
+  shape(b);
+  b.fillStyle = '#2a0406';
+  b.fill();
+  b.strokeStyle = '#140203';
+  b.lineWidth = 6;
+  b.stroke();
+  e.fillStyle = '#000';
+  e.fillRect(0, 0, W, H);
+  for (const ctx of [b, e]) {
+    ctx.fillStyle = ctx === b ? '#9c1216' : '#ffffff';
+    ctx.fillRect(40, 40, 944, 14); // LED bar
+    for (let k = 0; k < 6; k++) {
+      ctx.fillRect(60 + k * 24, 66, 14, 40);
+      ctx.fillRect(964 - k * 24 - 14, 66, 14, 40);
+    }
+  }
+  return { map: finish(base, { repeat: false }), emissive: finish(emis, { repeat: false }) };
+}
+
+// Honeycomb grille with rounded outline (alpha outside).
+export function grilleTexture() {
+  const W = 512;
+  const H = 128;
+  const c = canvas(W, H);
+  const ctx = c.getContext('2d');
+  ctx.beginPath();
+  ctx.roundRect(6, 6, W - 12, H - 12, 40);
+  ctx.fillStyle = '#0b0c0e';
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = '#2b2f35';
+  ctx.lineWidth = 3;
+  const r = 9;
+  for (let y = 0; y < H + r; y += r * 1.5) {
+    for (let x = 0; x < W + r; x += r * 1.732) {
+      const ox = (Math.round(y / (r * 1.5)) % 2) * r * 0.866;
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const a = Math.PI / 6 + (k * Math.PI) / 3;
+        const px = x + ox + Math.cos(a) * r;
+        const py = y + Math.sin(a) * r;
+        if (k === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+  ctx.strokeStyle = '#3d434b';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(6, 6, W - 12, H - 12, 40);
+  ctx.stroke();
+  return finish(c, { repeat: false });
+}
+
+// Bonnet vent with slats.
+export function ventTexture() {
+  const c = canvas(128, 192);
+  const ctx = c.getContext('2d');
+  ctx.beginPath();
+  ctx.roundRect(4, 4, 120, 184, 20);
+  ctx.fillStyle = '#0c0d10';
+  ctx.fill();
+  ctx.strokeStyle = '#30343a';
+  ctx.lineWidth = 6;
+  for (let y = 24; y < 180; y += 20) {
+    ctx.beginPath();
+    ctx.moveTo(16, y);
+    ctx.lineTo(112, y);
+    ctx.stroke();
+  }
   return finish(c, { repeat: false });
 }
 
 // Car paint with stripes, door gaps and race number.
 // u runs along the car (rear -> front), v around the section (bottom -> left side -> top -> right side -> bottom).
 export function carPaintTexture(color, stripe, number) {
+  // Drawn in a 1024 x 512 coordinate space, rendered at twice the resolution for crisp decals.
   const W = 1024;
   const H = 512;
-  const c = canvas(W, H);
+  const c = canvas(W * 2, H * 2);
   const ctx = c.getContext('2d');
+  ctx.scale(2, 2);
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, W, H);
   // Canvas y grows downward while v grows upward: y = (1 - v) * H
@@ -435,9 +638,10 @@ export function carPaintTexture(color, stripe, number) {
   ctx.fillRect(0, 0, W, H * 0.07);
   // Twin stripes over the top (v = 0.5)
   if (stripe) {
+    // Stripes stop short of the nose and tail, where the body sections converge.
     ctx.fillStyle = stripe;
-    ctx.fillRect(0, y(0.535), W, H * 0.022);
-    ctx.fillRect(0, y(0.487), W, H * 0.022);
+    ctx.fillRect(W * 0.05, y(0.535), W * 0.88, H * 0.022);
+    ctx.fillRect(W * 0.05, y(0.487), W * 0.88, H * 0.022);
   }
   // Door gaps on both sides (u 0.42..0.62)
   ctx.strokeStyle = 'rgba(0,0,0,0.45)';
@@ -479,4 +683,94 @@ export function carPaintTexture(color, stripe, number) {
 
 export function gaugeCanvas() {
   return canvas(512, 256);
+}
+
+// ------------------------------------------------------------------ open-world assets
+
+// Vertical fade for light beams (v = 0 bottom .. 1 top).
+export function beamTexture() {
+  const c = canvas(4, 256);
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 256, 0, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.15, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 4, 256);
+  return finish(c, { repeat: false, srgb: false });
+}
+
+// Floating label: title plus a small subtitle, on a dark rounded plate.
+export function labelTexture(title, sub, color) {
+  const c = canvas(512, 160);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(8,12,17,0.82)';
+  ctx.beginPath();
+  ctx.roundRect(8, 8, 496, 144, 22);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.fillRect(8, 138, 496, 10);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#e6eef3';
+  ctx.font = '900 64px "Big Shoulders Display", "Arial Narrow", sans-serif';
+  ctx.fillText(title.toUpperCase(), 256, 64, 470);
+  if (sub) {
+    ctx.fillStyle = color;
+    ctx.font = '600 28px "Barlow", sans-serif';
+    ctx.fillText(sub, 256, 114, 470);
+  }
+  return finish(c, { repeat: false });
+}
+
+export function rampTexture() {
+  const c = canvas(256, 512);
+  const ctx = c.getContext('2d');
+  const rng = mulberry32(21);
+  // Planks along the ramp (v runs up the ramp)
+  for (let x = 0; x < 256; x += 32) {
+    ctx.fillStyle = `rgb(${120 + rng() * 25},${86 + rng() * 18},${52 + rng() * 12})`;
+    ctx.fillRect(x, 0, 30, 512);
+  }
+  speckle(ctx, 256, 512, 5000, ['rgba(40,25,10,0.35)', 'rgba(255,230,190,0.15)'], rng, 2);
+  // Chevrons at the lip
+  for (let x = -64; x < 256; x += 64) {
+    ctx.fillStyle = '#f2c200';
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 32, 0);
+    ctx.lineTo(x + 64, 40);
+    ctx.lineTo(x + 32, 40);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 40, 256, 6);
+  return finish(c, { repeat: false });
+}
+
+// Dirt trail: packed gravel with two worn wheel tracks (u across, v along 10 m).
+export function trailTexture() {
+  const c = canvas(128, 256);
+  const ctx = c.getContext('2d');
+  const rng = mulberry32(33);
+  ctx.fillStyle = '#7a6a52';
+  ctx.fillRect(0, 0, 128, 256);
+  speckle(ctx, 128, 256, 6000, ['#6a5b45', '#8a7a60', '#5c4f3d', '#94866b'], rng, 2);
+  ctx.fillStyle = 'rgba(40,32,24,0.28)';
+  ctx.fillRect(24, 0, 22, 256);
+  ctx.fillRect(82, 0, 22, 256);
+  // Soft grass edges
+  const g = ctx.createLinearGradient(0, 0, 128, 0);
+  g.addColorStop(0, 'rgba(0,0,0,1)');
+  g.addColorStop(0.12, 'rgba(0,0,0,0)');
+  g.addColorStop(0.88, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,1)');
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 256);
+  ctx.globalCompositeOperation = 'source-over';
+  const t = finish(c, { repeat: true });
+  t.wrapS = THREE.ClampToEdgeWrapping;
+  return t;
 }

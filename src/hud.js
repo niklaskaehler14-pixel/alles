@@ -92,6 +92,29 @@ function arc(ctx, cx, cy, r, rpm, redline, limiter, width) {
   }
 }
 
+// Round activity marker with an upright glyph; optional stars underneath.
+function drawMarker(ctx, x, y, m, size, withStars = false) {
+  const r = size / 2;
+  ctx.fillStyle = '#0b0e12';
+  ctx.beginPath();
+  ctx.arc(x, y, r + 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = m.color;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#0b0e12';
+  ctx.font = `800 ${size * 0.62}px "Barlow", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(m.glyph, x, y + size * 0.03);
+  if (withStars && m.stars !== undefined) {
+    ctx.font = `700 ${size * 0.6}px "Barlow", sans-serif`;
+    ctx.fillStyle = '#ffd24a';
+    ctx.fillText('★'.repeat(m.stars) + '☆'.repeat(3 - m.stars), x, y + size * 0.95);
+  }
+}
+
 export class Hud {
   constructor(root, world) {
     this.root = root;
@@ -191,6 +214,18 @@ export class Hud {
     ctx.lineWidth = 3.4;
     path();
     ctx.stroke();
+    // Dirt trails of the off-road runs
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = '#c9b48a';
+    ctx.lineWidth = 2;
+    for (const cor of this.world.clearCorridors || []) {
+      if (!cor.trail) continue;
+      ctx.beginPath();
+      ctx.moveTo(toPx(cor.ax), toPx(cor.az));
+      ctx.lineTo(toPx(cor.bx), toPx(cor.bz));
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
     // Start line
     const sx = toPx(tr.x[tr.startIndex]);
     const sy = toPx(tr.z[tr.startIndex]);
@@ -200,7 +235,7 @@ export class Hud {
   }
 
   // cars: [{ x, z, yaw, color, player }]
-  drawMinimap(player, cars) {
+  drawMinimap(player, cars, markers = []) {
     const ctx = this.mctx;
     const W = this.mini.width;
     const H = this.mini.height;
@@ -235,6 +270,24 @@ export class Hud {
       ctx.stroke();
     }
     ctx.restore();
+    // Activity markers in screen space (upright glyphs), pinned to the rim when out of view.
+    const th = Math.PI + player.yaw;
+    const cs = Math.cos(th);
+    const sn = Math.sin(th);
+    const rim = W / 2 - 10;
+    for (const m of markers) {
+      const lx = ((m.x + WORLD.half) * scale - px) * zoom;
+      const lz = ((m.z + WORLD.half) * scale - pz) * zoom;
+      let sx = lx * cs - lz * sn;
+      let sy = lx * sn + lz * cs;
+      const d = Math.hypot(sx, sy);
+      if (d > rim) {
+        if (!m.target) continue;
+        sx *= rim / d;
+        sy *= rim / d;
+      }
+      drawMarker(ctx, W / 2 + sx, H / 2 + sy, m, W * 0.06);
+    }
     // Player arrow (always centre, pointing up)
     ctx.save();
     ctx.translate(W / 2, H / 2);
@@ -256,6 +309,78 @@ export class Hud {
     ctx.beginPath();
     ctx.arc(W / 2, H / 2, W / 2 - 2, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // Full-screen north-up map with every activity, the player and a legend.
+  drawWorldMap(canvas, player, cars, markers, totals) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const Wc = Math.round(canvas.clientWidth * dpr);
+    const Hc = Math.round(canvas.clientHeight * dpr);
+    if (canvas.width !== Wc || canvas.height !== Hc) {
+      canvas.width = Wc;
+      canvas.height = Hc;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, Wc, Hc);
+    ctx.fillStyle = 'rgba(6,9,13,0.78)';
+    ctx.fillRect(0, 0, Wc, Hc);
+    const size = Math.min(Wc, Hc) * 0.84;
+    const ox = (Wc - size) / 2;
+    const oy = (Hc - size) / 2 + Hc * 0.02;
+    ctx.drawImage(this.mapImage, ox, oy, size, size);
+    ctx.strokeStyle = 'rgba(230,238,243,0.4)';
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeRect(ox, oy, size, size);
+    const toX = (x) => ox + ((x + WORLD.half) / WORLD.size) * size;
+    const toY = (z) => oy + ((z + WORLD.half) / WORLD.size) * size;
+    for (const c of cars) {
+      ctx.fillStyle = c.color;
+      ctx.beginPath();
+      ctx.arc(toX(c.x), toY(c.z), 4 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const m of markers) drawMarker(ctx, toX(m.x), toY(m.z), m, 17 * dpr, true);
+    // Player
+    ctx.save();
+    ctx.translate(toX(player.x), toY(player.z));
+    ctx.rotate(Math.atan2(Math.cos(player.yaw), Math.sin(player.yaw)) + Math.PI / 2);
+    ctx.fillStyle = AMBER;
+    ctx.strokeStyle = '#0b0e12';
+    ctx.lineWidth = 2 * dpr;
+    const a = 11 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(0, -a * 1.3);
+    ctx.lineTo(a, a);
+    ctx.lineTo(0, a * 0.45);
+    ctx.lineTo(-a, a);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    // Title and legend
+    ctx.fillStyle = ICE;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = `800 ${22 * dpr}px "Big Shoulders Display", "Arial Narrow", sans-serif`;
+    ctx.fillText(`KARTE · ${totals.stars}/${totals.max} ★`, ox, Math.max(8 * dpr, oy - 30 * dpr));
+    const legend = [
+      ['C', '#3fd0ff', 'Checkpoint-Lauf'],
+      ['D', '#ff4fd8', 'Drift-Zone'],
+      ['B', '#f2a541', 'Blitzer'],
+      ['S', '#7dff7a', 'Sprungschanze'],
+    ];
+    ctx.font = `600 ${13 * dpr}px "Barlow", sans-serif`;
+    let lx = ox;
+    const ly = oy + size + 10 * dpr;
+    for (const [g, col, label] of legend) {
+      drawMarker(ctx, lx + 9 * dpr, ly + 9 * dpr, { glyph: g, color: col }, 16 * dpr);
+      ctx.font = `600 ${13 * dpr}px "Barlow", sans-serif`;
+      ctx.fillStyle = ICE;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, lx + 22 * dpr, ly + 9 * dpr);
+      lx += ctx.measureText(label).width + 44 * dpr;
+    }
   }
 
   drawGauge(car) {

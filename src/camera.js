@@ -71,7 +71,9 @@ export class CameraRig {
 
     if (this.mode === 'chase' || this.mode === 'far') {
       const far = this.mode === 'far';
-      const dist = (far ? 8.8 : 6.1) + clamp(speed / 60, 0, 1) * (far ? 1.6 : 1.1);
+      // Longitudinal g moves the camera: it closes in and dips under braking, pulls back on throttle.
+      this.lean = damp(this.lean || 0, clamp(-(car.axLocal || 0) / 12, -1, 1), 5, dt);
+      const dist = (far ? 8.8 : 6.1) + clamp(speed / 60, 0, 1) * (far ? 1.6 : 1.1) - this.lean * 0.9;
       const height = far ? 2.9 : 2.05;
       // Follow the travel direction partly so drifts show the car's side.
       const forward = car.forwardSpeed > 2;
@@ -96,7 +98,8 @@ export class CameraRig {
       this.pos.z = damp(this.pos.z, wantZ, 14, dt);
       this.pos.y = damp(this.pos.y, wantY, car.onGround ? 8 : 3, dt);
       cam.position.set(this.pos.x + sx, this.pos.y + sy, this.pos.z);
-      this.look.set(car.x + fwdX * 2.2, car.y + (far ? 1.0 : 0.95), car.z + fwdZ * 2.2);
+      this.look.set(car.x + fwdX * 2.2, car.y + (far ? 1.0 : 0.95) - this.lean * 0.18, car.z + fwdZ * 2.2);
+      if (car.abs && speed > 8) this.addShake(0.02);
       cam.lookAt(this.look);
       cam.fov = damp(cam.fov, (far ? 58 : 62) + clamp(speed / 80, 0, 1) * 16, 4, dt);
       cam.near = 0.2;
@@ -108,7 +111,7 @@ export class CameraRig {
       this.headX = damp(this.headX, -ay * (cockpit ? 0.035 : 0.01), 6, dt);
       this.headZ = damp(this.headZ, -ax * (cockpit ? 0.03 : 0.01), 6, dt);
       this.headY = damp(this.headY, 0, 6, dt);
-      const local = cockpit ? [0.37 + this.headX, 1.07 + sy * 0.5, -0.52 + this.headZ] : [0, 1.13 + sy * 0.3, 0.55];
+      const local = cockpit ? [0.32 + this.headX, 1.07 + sy * 0.5, -0.52 + this.headZ] : [0, 1.13 + sy * 0.3, 0.55];
       const m = car.model ? car.model.chassis.matrixWorld : null;
       if (m) {
         car.model.root.updateMatrixWorld(true);

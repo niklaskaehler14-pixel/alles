@@ -7,6 +7,7 @@ import { clamp, lerp, smoothstep } from './util.js';
 import { Track } from './track.js';
 import { Heightfield } from './heightfield.js';
 import { StaticColliders } from './collision.js';
+import { planActivities, inClearCorridor, rampSurface } from './activities.js';
 
 export class WorldData {
   constructor(seed = SEED) {
@@ -21,6 +22,7 @@ export class WorldData {
     this.rng = mulberry32(seed ^ 0x9e3779b9);
     this.cityHeight = 0;
     this.colliders = new StaticColliders(24);
+    this.lakeCentre = { x: LAKE.x, z: LAKE.z };
   }
 
   // ---------------------------------------------------------------- terrain shape
@@ -201,7 +203,13 @@ export class WorldData {
       const l = Math.abs(q.lateral);
       return q.height - (l > ROAD.half ? ((l - ROAD.half) / ROAD.shoulder) * 0.12 : 0);
     }
-    return this.heightfield.get(x, z);
+    const h = this.heightfield.get(x, z);
+    const ramp = rampSurface(this, x, z);
+    return ramp > 0 ? h + ramp : h;
+  }
+
+  planActivities() {
+    return planActivities(this);
   }
 
   surfaceAt(x, z, h, q) {
@@ -211,6 +219,7 @@ export class WorldData {
       if (l < ROAD.halfTotal) return 2; // gravel shoulder
     }
     if (Math.hypot(x - CITY.x, z - CITY.z) < CITY.radius - 8) return 0;
+    if (rampSurface(this, x, z) > 0) return 0; // ramp deck grips like asphalt
     if (h < WORLD.waterLevel + 2.2) return 3; // sand / shallow water
     return 1; // grass
   }
@@ -303,6 +312,7 @@ export class WorldData {
       const alpine = smoothstep(150, 300, h);
       const p = smoothstep(-0.25, 0.35, forest) * (1 - alpine * 0.8) + 0.025;
       if (rng() > p * 0.42) continue;
+      if (inClearCorridor(this, x, z)) continue;
       const near = this.track.nearest(x, z, -1, q);
       if (near.index >= 0 && near.dist < ROAD.halfTotal + 9) continue;
       const pine = h > 75 || forest + this.nMisc(x * 0.01, z * 0.01) * 0.3 > 0.25;
@@ -329,6 +339,7 @@ export class WorldData {
       const want = edge > 0.7 || (lake > 0.05 && lake < 0.5) || rng() < 0.05;
       if (!want || h < -2) continue;
       if (Math.hypot(x - CITY.x, z - CITY.z) < CITY.radius + 30) continue;
+      if (inClearCorridor(this, x, z, 4)) continue;
       const near = this.track.nearest(x, z, -1, q);
       if (near.index >= 0 && near.dist < ROAD.halfTotal + 7) continue;
       const s = 0.6 + rng() * rng() * 3.2;
@@ -362,6 +373,7 @@ export class WorldData {
     this.buildTerrain();
     this.placeCity();
     this.placeLamps();
+    this.planActivities();
     this.placeVegetation();
     this.placeBillboards();
     return this;

@@ -244,7 +244,7 @@ function buildShared() {
   const caliper = new THREE.BoxGeometry(0.07, 0.15, 0.1);
   caliper.translate(0.02, 0.13, -0.08);
 
-  return { body, cabin, lining, tire, barrel, rimFace, disc, caliper, HALF_LEN, merged: new Map() };
+  return { body, cabin, lining, tire, barrel, rimFace, disc, caliper, HALF_LEN, merged: new Map(), patches: new Map() };
 }
 
 function sharedMaterials() {
@@ -316,6 +316,140 @@ function mesh(geo, mat, cast = true) {
   return m;
 }
 
+// Ray queries against the body shell so lights, plates and trim sit exactly on the surface.
+let bodySampler = null;
+function sampleBody(origin, dir) {
+  if (!bodySampler) {
+    const target = new THREE.Mesh(shared.body, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+    target.updateMatrixWorld(true);
+    bodySampler = {
+      target,
+      rc: new THREE.Raycaster(),
+      tri: new THREE.Triangle(),
+      na: new THREE.Vector3(),
+      nb: new THREE.Vector3(),
+      nc: new THREE.Vector3(),
+    };
+  }
+  const S = bodySampler;
+  S.rc.set(origin, dir);
+  S.rc.far = 6;
+  const hit = S.rc.intersectObject(S.target, false)[0];
+  if (!hit) return null;
+  const pos = shared.body.attributes.position;
+  const nrm = shared.body.attributes.normal;
+  const f = hit.face;
+  S.tri.setFromAttributeAndIndices(pos, f.a, f.b, f.c);
+  S.na.fromBufferAttribute(nrm, f.a);
+  S.nb.fromBufferAttribute(nrm, f.b);
+  S.nc.fromBufferAttribute(nrm, f.c);
+  const n = THREE.Triangle.getInterpolation(hit.point, S.tri.a, S.tri.b, S.tri.c, S.na, S.nb, S.nc, new THREE.Vector3()).normalize();
+  if (n.dot(dir) > 0) n.negate();
+  return { p: hit.point.clone(), n };
+}
+
+// A thin mesh that follows the body surface: rays are cast along D through a grid spanned by
+// U (texture u) and V (texture v) around `center`, and each hit is lifted by `offset`.
+function surfacePatch(key, { center, U, V, D, nu = 12, nv = 4, offset = 0.004 }) {
+  if (shared.patches.has(key)) return shared.patches.get(key);
+  const dir = D.clone().normalize();
+  const pos = [];
+  const nor = [];
+  const uv = [];
+  const ok = [];
+  const o = new THREE.Vector3();
+  for (let j = 0; j <= nv; j++) {
+    for (let i = 0; i <= nu; i++) {
+      o.copy(center)
+        .addScaledVector(U, i / nu - 0.5)
+        .addScaledVector(V, j / nv - 0.5)
+        .addScaledVector(dir, -2);
+      const h = sampleBody(o, dir);
+      ok.push(!!h);
+      const p = h ? h.p.addScaledVector(h.n, offset) : o;
+      const n = h ? h.n : dir.clone().negate();
+      pos.push(p.x, p.y, p.z);
+      nor.push(n.x, n.y, n.z);
+      uv.push(i / nu, j / nv);
+    }
+  }
+  const index = [];
+  const row = nu + 1;
+  for (let j = 0; j < nv; j++) {
+    for (let i = 0; i < nu; i++) {
+      const a = j * row + i;
+      const b = a + 1;
+      const c = a + row;
+      const d = c + 1;
+      if (ok[a] && ok[b] && ok[c] && ok[d]) index.push(a, b, d, a, d, c);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  geo.computeBoundingSphere();
+  shared.patches.set(key, geo);
+  return geo;
+}
+
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+
+// A flat rectangle facing against D, placed in front of the highest surface point it covers.
+function flatPanel(key, { center, U, V, D, gap = 0.01 }) {
+  if (shared.patches.has(key)) return shared.patches.get(key);
+  const dir = D.clone().normalize();
+  let front = -Infinity;
+  const o = new THREE.Vector3();
+  for (let j = 0; j <= 4; j++) {
+    for (let i = 0; i <= 6; i++) {
+      o.copy(center)
+        .addScaledVector(U, i / 6 - 0.5)
+        .addScaledVector(V, j / 4 - 0.5)
+        .addScaledVector(dir, -2);
+      const h = sampleBody(o, dir);
+      if (h) front = Math.max(front, -h.p.dot(dir));
+    }
+  }
+  const base = center.clone().addScaledVector(dir, -center.dot(dir) - front - gap);
+  const geo = new THREE.BufferGeometry();
+  const corners = [
+    [-0.5, -0.5, 0, 0],
+    [0.5, -0.5, 1, 0],
+    [0.5, 0.5, 1, 1],
+    [-0.5, 0.5, 0, 1],
+  ];
+  const pos = [];
+  const nor = [];
+  const uv = [];
+  for (const [a, b, u, v] of corners) {
+    const p = base.clone().addScaledVector(U, a).addScaledVector(V, b);
+    pos.push(p.x, p.y, p.z);
+    nor.push(-dir.x, -dir.y, -dir.z);
+    uv.push(u, v);
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex([0, 1, 2, 0, 2, 3]);
+  geo.computeBoundingSphere();
+  shared.patches.set(key, geo);
+  return geo;
+}
+
+function decalMaterial(name, opts) {
+  return new THREE.MeshStandardMaterial({
+    name,
+    alphaTest: 0.5,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    ...opts,
+  });
+}
+
 export class CarModel {
   constructor({ color = '#c1121f', stripe = '#f4f4f0', number = 7, plate = 'NK·GT 7', detail = 'high', glassOpacity = 0.72 } = {}) {
     if (!shared) shared = buildShared();
@@ -330,6 +464,11 @@ export class CarModel {
 
     const paintTex = TX.carPaintTexture(color, stripe, number);
     this.paint = new THREE.MeshPhysicalMaterial({ name: 'paint', map: paintTex, metalness: 0.35, roughness: 0.4, specularIntensity: 0.7, clearcoat: 0.8, clearcoatRoughness: 0.09, envMapIntensity: 1.2 });
+    // Same paint without decals, for small parts whose UVs would stretch the stripes.
+    this.paintPlain = this.paint.clone();
+    this.paintPlain.name = 'paintPlain';
+    this.paintPlain.map = null;
+    this.paintPlain.color.set(color);
     const glass = detail === 'high' ? M.glass.clone() : M.glassDark;
     if (detail === 'high') glass.opacity = glassOpacity;
     this.glass = glass;
@@ -369,83 +508,85 @@ export class CarModel {
       c.add(m);
       return m;
     };
-    // Front intake, splitter, side skirts, diffuser
-    add(new THREE.BoxGeometry(1.0, 0.17, 0.12), M.trim, 0, 0.33, 2.15);
-    add(new THREE.BoxGeometry(0.34, 0.12, 0.1), M.trim, 0.58, 0.3, 2.06, 0, 0.35);
-    add(new THREE.BoxGeometry(0.34, 0.12, 0.1), M.trim, -0.58, 0.3, 2.06, 0, -0.35);
-    add(new THREE.BoxGeometry(1.3, 0.03, 0.34), M.carbon, 0, 0.17, 2.02);
+    const decals = shared.decals || (shared.decals = {
+      grille: decalMaterial('grille', { map: TX.grilleTexture(), roughness: 0.6, metalness: 0.3 }),
+      vent: decalMaterial('vent', { map: TX.ventTexture(), roughness: 0.6, metalness: 0.2 }),
+    });
+    // Front grille and side intakes, projected onto the nose
+    c.add(mesh(surfacePatch('grille', { center: V3(0, 0.3, 2.3), U: V3(0.96, 0, 0), V: V3(0, 0.17, 0), D: V3(0, 0, -1), nu: 16, nv: 3 }), decals.grille, false));
+    for (const sd of [1, -1]) {
+      const g = surfacePatch(`intake${sd}`, { center: V3(sd * 0.56, 0.31, 2.3), U: V3(0.24 * sd, 0, 0), V: V3(0, 0.12, 0), D: V3(-0.25 * sd, 0, -1), nu: 6, nv: 2 });
+      c.add(mesh(g, decals.grille, false));
+    }
+    // Bonnet vents
+    for (const sd of [1, -1]) {
+      const g = surfacePatch(`vent${sd}`, { center: V3(sd * 0.28, 1.5, 1.34), U: V3(0.15 * sd, 0, 0), V: V3(0, 0, -0.26), D: V3(0, -1, 0), nu: 3, nv: 5, offset: 0.003 });
+      c.add(mesh(g, decals.vent, false));
+    }
+    // Splitter, side skirts, diffuser
+    add(new THREE.BoxGeometry(1.24, 0.025, 0.2), M.carbon, 0, 0.175, 2.06);
     for (const sd of [1, -1]) add(new THREE.BoxGeometry(0.06, 0.09, 1.7), M.carbon, sd * 0.93, 0.22, -0.08);
-    add(new THREE.BoxGeometry(1.36, 0.1, 0.32), M.carbon, 0, 0.24, -2.08);
-    for (let f = -2; f <= 2; f++) add(new THREE.BoxGeometry(0.015, 0.1, 0.28), M.trim, f * 0.26, 0.2, -2.1);
-    // Exhausts
-    const ex = new THREE.CylinderGeometry(0.052, 0.058, 0.2, 18, 1, true);
+    add(new THREE.BoxGeometry(1.3, 0.1, 0.32), M.carbon, 0, 0.24, -2.06);
+    for (let f = -2; f <= 2; f++) add(new THREE.BoxGeometry(0.015, 0.1, 0.28), M.trim, f * 0.24, 0.2, -2.08);
+    // Exhaust tips poke out of the rear surface
+    const ex = new THREE.CylinderGeometry(0.05, 0.056, 0.16, 18, 1, true);
     ex.rotateX(Math.PI / 2);
-    for (const sd of [1, -1]) add(ex, M.chrome, sd * 0.34, 0.27, -2.17);
-    // Rear wing
+    for (const sd of [1, -1]) {
+      const h = sampleBody(V3(sd * 0.34, 0.3, -3), V3(0, 0, 1));
+      const z = h ? h.p.z - 0.04 : -2.17;
+      add(ex, M.chrome, sd * 0.34, 0.3, z);
+    }
+    // Rear wing on two stands that reach the deck
+    const deck = sampleBody(V3(0.55, 2, -1.93), V3(0, -1, 0));
+    const deckY = deck ? deck.p.y : 0.95;
     add(new THREE.BoxGeometry(1.72, 0.03, 0.3), M.carbon, 0, 1.1, -1.96, -0.08);
     for (const sd of [1, -1]) {
-      add(new THREE.BoxGeometry(0.03, 0.17, 0.09), M.carbon, sd * 0.55, 1.01, -1.93);
+      const hgt = 1.09 - deckY + 0.02;
+      add(new THREE.BoxGeometry(0.03, hgt, 0.09), M.carbon, sd * 0.55, deckY + hgt / 2 - 0.01, -1.93);
       add(new THREE.BoxGeometry(0.02, 0.13, 0.36), M.carbon, sd * 0.86, 1.1, -1.96);
     }
-    // Mirrors
+    // Door mirrors mounted on the body side at the base of the A-pillar
     for (const sd of [1, -1]) {
-      add(new THREE.BoxGeometry(0.2, 0.1, 0.13), this.paint, sd * 0.97, 1.0, 0.44, 0, sd * 0.12);
-      add(new THREE.BoxGeometry(0.1, 0.03, 0.05), M.trim, sd * 0.88, 0.96, 0.46);
-      add(new THREE.PlaneGeometry(0.16, 0.07), M.chrome, sd * 0.97, 1.0, 0.374, 0, Math.PI);
+      const h = sampleBody(V3(sd * 2, 0.86, 0.46), V3(-sd, 0, 0));
+      const bx = h ? h.p.x : sd * 0.9;
+      add(new THREE.BoxGeometry(0.12, 0.035, 0.05), M.trim, bx + sd * 0.05, 0.9, 0.46);
+      const housing = add(new THREE.SphereGeometry(1, 18, 12), this.paintPlain, bx + sd * 0.13, 0.96, 0.47, 0, sd * 0.12);
+      housing.scale.set(0.1, 0.055, 0.07);
+      add(new THREE.PlaneGeometry(0.15, 0.075), M.chrome, bx + sd * 0.13, 0.96, 0.398, 0, Math.PI);
     }
-    // Hood vents
-    for (const sd of [1, -1]) add(new THREE.BoxGeometry(0.16, 0.012, 0.22), M.trim, sd * 0.28, 0.792, 1.32, -0.14);
   }
 
   #addLights() {
     const c = this.chassis;
-    this.headMat = new THREE.MeshStandardMaterial({ name: 'head', color: '#dfe7ef', emissive: '#e8f1ff', emissiveIntensity: 1.2, roughness: 0.1, metalness: 0.3 });
-    this.drlMat = new THREE.MeshStandardMaterial({ name: 'drl', color: '#ffffff', emissive: '#f1f6ff', emissiveIntensity: 2.5 });
-    this.tailMat = new THREE.MeshStandardMaterial({ name: 'tail', color: '#4a0a0a', emissive: '#ff1a10', emissiveIntensity: 1.2, roughness: 0.3 });
-    this.reverseMat = new THREE.MeshStandardMaterial({ name: 'reverse', color: '#dddddd', emissive: '#ffffff', emissiveIntensity: 0 });
-    const housing = shared.housing || (shared.housing = new THREE.MeshStandardMaterial({ name: 'housing', color: '#0c0d10', roughness: 0.2, metalness: 0.6 }));
+    const head = shared.headTex || (shared.headTex = TX.headlightTextures());
+    const tail = shared.tailTex || (shared.tailTex = TX.tailLightTextures());
+    this.headMat = decalMaterial('head', { map: head.map, emissiveMap: head.emissive, emissive: '#eaf2ff', emissiveIntensity: 1.2, roughness: 0.12, metalness: 0.5 });
+    this.tailMat = decalMaterial('tail', { map: tail.map, emissiveMap: tail.emissive, emissive: '#ff1a10', emissiveIntensity: 1, roughness: 0.25, metalness: 0.2 });
+    this.reverseMat = decalMaterial('reverse', { color: '#d9dde2', emissive: '#ffffff', emissiveIntensity: 0, roughness: 0.2 });
+    // Headlights sit on the upper corners of the nose, seen along a slightly downward view.
     for (const sd of [1, -1]) {
-      const h = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), housing);
-      h.scale.set(0.2, 0.05, 0.17);
-      h.position.set(sd * 0.55, 0.588, 1.99);
-      h.rotation.set(0.32, sd * 0.35, 0);
-      c.add(h);
-      const lens = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), this.headMat);
-      lens.scale.set(0.065, 0.04, 0.05);
-      lens.position.set(sd * 0.49, 0.6, 2.05);
-      c.add(lens);
-      const lens2 = lens.clone();
-      lens2.position.set(sd * 0.62, 0.59, 2.0);
-      c.add(lens2);
-      const drl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.018, 0.03), this.drlMat);
-      drl.position.set(sd * 0.56, 0.555, 2.04);
-      drl.rotation.set(0, sd * 0.35, 0);
-      c.add(drl);
+      const D = V3(-0.12 * sd, -0.5, -1).normalize();
+      const U = V3(0.4 * sd, 0, 0);
+      const V = new THREE.Vector3().crossVectors(V3(sd, 0, 0), D).normalize().multiplyScalar(0.19 * sd);
+      const g = surfacePatch(`head${sd}`, { center: V3(sd * 0.47, 0.64, 1.99), U, V, D, nu: 12, nv: 6, offset: 0.005 });
+      c.add(mesh(g, this.headMat, false));
     }
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.04, 0.05), this.tailMat);
-    bar.position.set(0, 0.79, -2.135);
-    c.add(bar);
+    // Light bar across the tail
+    c.add(mesh(surfacePatch('tail', { center: V3(0, 0.77, -2.3), U: V3(-1.12, 0, 0), V: V3(0, 0.1, 0), D: V3(0, -0.15, 1), nu: 24, nv: 3, offset: 0.005 }), this.tailMat, false));
+    // Reverse lights low on the rear
     for (const sd of [1, -1]) {
-      const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.06), this.tailMat);
-      t.position.set(sd * 0.5, 0.79, -2.1);
-      t.rotation.y = sd * 0.35;
-      c.add(t);
-      const r = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.04), this.reverseMat);
-      r.position.set(sd * 0.5, 0.32, -2.17);
-      c.add(r);
+      c.add(mesh(surfacePatch(`reverse${sd}`, { center: V3(sd * 0.5, 0.36, -2.3), U: V3(-0.14 * sd, 0, 0), V: V3(0, 0.035, 0), D: V3(0, 0, 1), nu: 3, nv: 1, offset: 0.004 }), this.reverseMat, false));
     }
   }
 
   #addPlates(text) {
     const tex = TX.plateTexture(text);
-    const mat = new THREE.MeshStandardMaterial({ name: 'plate', map: tex, roughness: 0.4 });
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.12), mat);
-    front.position.set(0, 0.33, 2.232);
-    this.chassis.add(front);
-    const rear = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.12), mat);
-    rear.position.set(0, 0.5, -2.228);
-    rear.rotation.y = Math.PI;
-    this.chassis.add(rear);
+    const mat = decalMaterial('plate', { map: tex, roughness: 0.35, metalness: 0.1, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    // Plates are flat, mounted just in front of the most protruding point behind them.
+    const front = flatPanel('plateFront', { center: V3(0, 0.31, 2.3), U: V3(0.52, 0, 0), V: V3(0, 0.112, 0), D: V3(0, 0, -1), gap: 0.012 });
+    const rear = flatPanel('plateRear', { center: V3(0, 0.5, -2.3), U: V3(-0.52, 0, 0), V: V3(0, 0.112, 0), D: V3(0, 0, 1), gap: 0.01 });
+    this.chassis.add(mesh(front, mat, false));
+    this.chassis.add(mesh(rear, mat, false));
   }
 
   #makeWheel(M, x, z, front) {
@@ -482,17 +623,17 @@ export class CarModel {
       return m;
     };
     // Tub (inside walls)
-    add(new THREE.BoxGeometry(1.66, 0.64, 2.1), M.interior, 0, 0.58, -0.48);
+    add(new THREE.BoxGeometry(1.3, 0.54, 2.1), M.interior, 0, 0.53, -0.48);
     // Dashboard
-    add(new THREE.BoxGeometry(1.62, 0.2, 0.4), M.interiorFront, 0, 0.76, 0.42);
-    add(new THREE.BoxGeometry(1.5, 0.04, 0.32), M.interiorFront, 0, 0.87, 0.46, 0.22);
+    add(new THREE.BoxGeometry(1.08, 0.2, 0.4), M.interiorFront, 0, 0.76, 0.42);
+    add(new THREE.BoxGeometry(1.04, 0.04, 0.3), M.interiorFront, 0, 0.855, 0.44, 0.22);
     // Binnacle visor and gauges
-    add(new THREE.BoxGeometry(0.46, 0.03, 0.18), M.interiorFront, 0.37, 0.975, 0.38, 0.12);
-    add(new THREE.BoxGeometry(0.46, 0.12, 0.05), M.interiorFront, 0.37, 0.9, 0.47);
+    add(new THREE.BoxGeometry(0.4, 0.03, 0.18), M.interiorFront, 0.33, 0.975, 0.38, 0.12);
+    add(new THREE.BoxGeometry(0.4, 0.12, 0.05), M.interiorFront, 0.33, 0.9, 0.47);
     this.gaugeCanvas = TX.gaugeCanvas();
     this.gaugeTex = new THREE.CanvasTexture(this.gaugeCanvas);
     this.gaugeTex.colorSpace = THREE.SRGBColorSpace;
-    const gauge = add(new THREE.PlaneGeometry(0.4, 0.2), new THREE.MeshBasicMaterial({ map: this.gaugeTex, toneMapped: false }), 0.37, 0.9, 0.34, 0.28, Math.PI);
+    const gauge = add(new THREE.PlaneGeometry(0.4, 0.2), new THREE.MeshBasicMaterial({ map: this.gaugeTex, toneMapped: false }), 0.33, 0.9, 0.34, 0.28, Math.PI);
     gauge.renderOrder = 3;
     // Centre display
     const screenCanvas = document.createElement('canvas');
@@ -519,10 +660,10 @@ export class CarModel {
     add(new THREE.CylinderGeometry(0.02, 0.025, 0.12, 10), M.chrome, 0, 0.62, -0.05);
     // Seats
     for (const sd of [1, -1]) {
-      add(new THREE.BoxGeometry(0.5, 0.13, 0.52), M.seat, sd * 0.37, 0.36, -0.46);
-      add(new THREE.BoxGeometry(0.52, 0.7, 0.14), M.seat, sd * 0.37, 0.74, -0.8, -0.18);
-      add(new THREE.BoxGeometry(0.1, 0.62, 0.15), M.seatAccent, sd * 0.37, 0.75, -0.79, -0.18);
-      add(new THREE.BoxGeometry(0.3, 0.18, 0.1), M.seat, sd * 0.37, 1.16, -0.86, -0.18);
+      add(new THREE.BoxGeometry(0.42, 0.13, 0.5), M.seat, sd * 0.31, 0.36, -0.46);
+      add(new THREE.BoxGeometry(0.42, 0.64, 0.14), M.seat, sd * 0.31, 0.72, -0.8, -0.18);
+      add(new THREE.BoxGeometry(0.09, 0.56, 0.15), M.seatAccent, sd * 0.31, 0.73, -0.79, -0.18);
+      add(new THREE.BoxGeometry(0.24, 0.16, 0.1), M.seat, sd * 0.31, 1.1, -0.85, -0.18);
     }
     // Headliner
     const liner = add(new THREE.PlaneGeometry(1.2, 0.95), M.lining, 0, 1.2, -0.44, Math.PI / 2);
@@ -531,7 +672,7 @@ export class CarModel {
     add(new THREE.BoxGeometry(0.24, 0.07, 0.03), M.trim, 0, 1.13, 0.1);
     // Steering wheel
     const wheel = new THREE.Group();
-    wheel.position.set(0.37, 0.83, 0.16);
+    wheel.position.set(0.33, 0.83, 0.16);
     wheel.rotation.x = 0.36;
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.021, 10, 40), M.trim);
     wheel.add(rim);
@@ -555,7 +696,7 @@ export class CarModel {
     this.steeringWheel = wheel;
     // Driver figure (hidden in cockpit view)
     const driver = new THREE.Group();
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.52, 0.26), M.suit);
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.5, 0.24), M.suit);
     torso.position.set(0, 0.68, -0.62);
     torso.rotation.x = -0.18;
     driver.add(torso);
@@ -571,7 +712,7 @@ export class CarModel {
       arm.rotation.set(Math.PI / 2 - 0.45, 0, sd * 0.25);
       driver.add(arm);
     }
-    driver.position.x = 0.37;
+    driver.position.x = 0.31;
     driver.traverse((o) => {
       if (o.isMesh) o.castShadow = true;
     });
@@ -584,8 +725,8 @@ export class CarModel {
   }
 
   setLights({ headlights = false, brake = 0, reverse = false }) {
-    this.headMat.emissiveIntensity = headlights ? 6 : 1.2;
-    this.tailMat.emissiveIntensity = 0.45 + (headlights ? 0.55 : 0) + brake * 3.2;
+    this.headMat.emissiveIntensity = headlights ? 5 : 1.4;
+    this.tailMat.emissiveIntensity = 0.6 + (headlights ? 0.6 : 0) + brake * 3.4;
     this.reverseMat.emissiveIntensity = reverse ? 4 : 0;
   }
 

@@ -153,13 +153,13 @@
   #touch .pad::before { left: 14px; border-right-color: var(--ice); border-left-width: 0; }
   #touch .pad::after { right: 14px; border-left-color: var(--ice); border-right-width: 0; }
   .steer-knob { width: 64px; height: 64px; border-radius: 50%; background: rgba(230,238,243,0.18); border: 2px solid rgba(230,238,243,0.5); }
-  .pedals { position: absolute; right: calc(16px + var(--safe-r)); bottom: calc(16px + var(--safe-b)); display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; gap: 10px; pointer-events: auto; }
+  .pedals { position: absolute; right: calc(16px + var(--safe-r)); bottom: calc(16px + var(--safe-b)); display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; gap: 10px; pointer-events: auto; touch-action: none; }
   .pedal { border-radius: 16px; border: 1px solid var(--line); background: rgba(11,16,22,0.45); display: grid; place-items: center; font: 800 18px var(--display); letter-spacing: 0.06em; text-transform: uppercase; touch-action: none; }
-  .pedal.gas { grid-row: 1 / span 2; grid-column: 2; width: 92px; height: 170px; background: rgba(95,191,143,0.22); }
-  .pedal.brake { width: 92px; height: 80px; background: rgba(255,77,61,0.2); }
-  .pedal.hand { width: 92px; height: 80px; font-size: 14px; }
+  .pedal.gas { grid-row: 1 / span 2; grid-column: 2; width: 100px; height: 196px; background: rgba(95,191,143,0.22); }
+  .pedal.brake { grid-row: 2; grid-column: 1; width: 100px; height: 128px; background: rgba(255,77,61,0.24); }
+  .pedal.hand { grid-row: 1; grid-column: 1; width: 100px; height: 58px; font-size: 14px; }
   .pedal.is-down { background: rgba(242,165,65,0.45); }
-  .touch-top { position: absolute; right: calc(200px + var(--safe-r)); bottom: calc(16px + var(--safe-b)); display: grid; gap: 8px; pointer-events: auto; }
+  .touch-top { position: absolute; right: calc(236px + var(--safe-r)); bottom: calc(16px + var(--safe-b)); display: grid; gap: 8px; pointer-events: auto; }
   body.touch #gauge { width: 132px; height: 132px; right: auto; left: 50%; transform: translateX(-50%); bottom: auto; top: calc(10px + var(--safe-t)); }
   body.touch #minimap { width: 118px; height: 118px; }
   body.touch #hud-buttons { top: calc(136px + var(--safe-t)); }
@@ -183,6 +183,30 @@
   .results tr.me td { color: var(--amber); }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
   .muted { color: var(--mist); font-size: 13px; margin: 0; }
+
+  /* ---------- open world ---------- */
+  #activity {
+    position: absolute; left: 50%; top: calc(14px + var(--safe-t)); transform: translateX(-50%); min-width: 230px; max-width: calc(100% - 420px);
+    background: var(--panel); border-radius: 10px; padding: 8px 16px 10px; text-align: center; border-top: 3px solid var(--act, var(--amber));
+    font-variant-numeric: tabular-nums;
+  }
+  #act-kind { font: 600 11px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--act, var(--amber)); }
+  #act-title { font: 800 22px/1.05 var(--display); text-transform: uppercase; letter-spacing: 0.02em; }
+  #act-value { font: 700 28px/1.2 var(--mono); }
+  #act-sub { font: 500 12px var(--body); color: var(--mist); }
+  #nav { position: absolute; left: 50%; top: calc(150px + var(--safe-t)); transform: translateX(-50%); display: grid; justify-items: center; gap: 2px; }
+  #nav-arrow { width: 54px; height: 54px; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.6)); transition: transform 0.08s linear; }
+  #nav-dist { font: 700 14px var(--mono); background: var(--panel); padding: 2px 8px; border-radius: 6px; }
+  #prompt { position: absolute; left: 50%; bottom: calc(120px + var(--safe-b)); transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: var(--panel); border-left: 4px solid #3fd0ff; font: 600 15px var(--body); white-space: nowrap; }
+  #result-toast { position: absolute; left: 50%; top: 46%; transform: translateX(-50%); padding: 10px 18px; border-radius: 10px; background: var(--panel); font: 700 17px var(--body); white-space: nowrap; color: #ffd24a; }
+  #flash { position: fixed; inset: 0; background: #fff; pointer-events: none; z-index: 20; opacity: 0; }
+  #flash.go { animation: flash 0.45s ease-out; }
+  @keyframes flash { 0% { opacity: 0.85; } 100% { opacity: 0; } }
+  #worldmap { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 25; pointer-events: none; }
+  body.touch #activity { top: calc(150px + var(--safe-t)); max-width: calc(100% - 32px); }
+  body.touch #nav { top: calc(240px + var(--safe-t)); }
+  body.touch #prompt { bottom: auto; top: calc(150px + var(--safe-t)); }
+  @media (prefers-reduced-motion: reduce) { #flash.go { animation: none; } }
 
   @media (max-width: 720px) {
     #menu { background: rgba(8, 12, 17, 0.72); }
@@ -236,9 +260,9 @@
     <div class="group">
       <div class="group-label">Modus</div>
       <div class="modes" id="modes">
+        <button class="mode" data-mode="free" aria-pressed="false"><b>Open World</b><small>Checkpoint-Läufe, Drift-Zonen, Blitzer und Schanzen</small><span class="tag" id="stars-tag">★ 0/48</span></button>
         <button class="mode" data-mode="race" aria-pressed="true"><b>Rennen</b><small>Gegen 5 Fahrer, Startaufstellung</small><span class="tag">KI ×5</span></button>
         <button class="mode" data-mode="time" aria-pressed="false"><b>Zeitfahren</b><small>Allein auf der Strecke, jage deine Bestzeit</small><span class="tag">Runden</span></button>
-        <button class="mode" data-mode="free" aria-pressed="false"><b>Freie Fahrt</b><small>Offene Welt mit Verkehr und Drift-Punkten</small><span class="tag">Drift</span></button>
       </div>
     </div>
     <div class="group" id="laps-group">
@@ -290,12 +314,22 @@
   <canvas id="minimap" aria-label="Minikarte"></canvas>
   <div id="hud-buttons">
     <button class="hud-btn" id="btn-camera" title="Kamera wechseln (C)" aria-label="Kamera wechseln"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+    <button class="hud-btn" id="btn-map" title="Karte (M)" aria-label="Karte"><svg viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg></button>
     <button class="hud-btn" id="btn-pause" title="Pause (Esc)" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg></button>
   </div>
   <canvas id="gauge" aria-label="Drehzahl und Geschwindigkeit"></canvas>
   <div id="message" hidden></div>
   <div id="toast" hidden></div>
+  <div id="activity" hidden><div id="act-kind"></div><div id="act-title"></div><div id="act-value"></div><div id="act-sub"></div></div>
+  <div id="nav" hidden>
+    <svg id="nav-arrow" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 3 L41 40 L24 31 L7 40 Z" fill="#3fd0ff" stroke="#0b0e12" stroke-width="2.5" stroke-linejoin="round"/></svg>
+    <span id="nav-dist"></span>
+  </div>
+  <div id="prompt" hidden></div>
+  <div id="result-toast" hidden></div>
 </div>
+<div id="flash" hidden></div>
+<canvas id="worldmap" hidden aria-label="Weltkarte"></canvas>
 
 <div id="touch" hidden>
   <div class="pad" data-steer aria-label="Lenken"><div class="steer-knob"></div></div>
@@ -330,6 +364,7 @@
       </div>
     </div>
     <div class="row">
+      <button class="secondary" id="abort-btn" hidden>Lauf abbrechen</button>
       <button class="secondary" id="menu-btn">Hauptmenü</button>
     </div>
   </div>

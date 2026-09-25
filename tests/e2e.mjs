@@ -55,6 +55,7 @@ async function openGame({ settings = {}, viewport = { width: 960, height: 540 },
   await page.route('https://fonts.gstatic.com/**', (route) => route.abort());
   await page.addInitScript((s) => {
     localStorage.setItem('nordkamm.settings.v1', JSON.stringify(s));
+    localStorage.removeItem('nordkamm.progress.v1');
   }, settings);
   const t0 = Date.now();
   await page.goto(`http://localhost:${port}/index.html`);
@@ -88,12 +89,6 @@ const shot = async (page, file) => {
   await sleep(300);
   await page.screenshot({ path: path.join(outDir, file) });
 };
-
-async function hold(page, key, ms) {
-  await page.keyboard.down(key);
-  await sleep(ms);
-  await page.keyboard.up(key);
-}
 
 async function waitRunning(page) {
   for (let i = 0; i < 20; i++) {
@@ -216,6 +211,93 @@ await run('finish', async () => {
   await context.close();
 });
 
+await run('openworld', async () => {
+  const { page, context, errors } = await openGame({ name: 'openworld', settings: { mode: 'free', time: 'day', quality: 'medium', paint: 0, camera: 'chase' } });
+  await page.click('#start-btn');
+  await waitRunning(page);
+  // Roll into the start ring of the city run.
+  await page.evaluate(() => {
+    const g = window.__nordkamm;
+    g.ai.forEach((a) => (a.model.root.visible = false));
+    g.ai = [];
+    const r = g.data.routes.find((x) => x.id === 'run-city');
+    const cp = r.checkpoints[0];
+    const h = Math.atan2(cp.x - r.start.x, cp.z - r.start.z);
+    g.placeCar(r.start.x - Math.sin(h) * 12, r.start.z - Math.cos(h) * 12, h);
+    g.vehicle.vx = Math.sin(h) * 8;
+    g.vehicle.vz = Math.cos(h) * 8;
+  });
+  await sim(page, 2);
+  const started = await page.evaluate(() => ({ run: !!window.__nordkamm.openWorld.run, holding: window.__nordkamm.openWorld.holding }));
+  if (!started.run || !started.holding) throw new Error(`run did not start: ${JSON.stringify(started)}`);
+  await sim(page, 3.5);
+  await shot(page, '14-ow-run.png');
+  const cps = await page.evaluate(() => window.__nordkamm.openWorld.run.route.checkpoints.length);
+  for (let i = 0; i < cps; i++) {
+    await page.evaluate(() => {
+      const g = window.__nordkamm;
+      const active = g.openWorld.run;
+      const r = active.route;
+      const cp = r.checkpoints[active.next];
+      const from = active.next === 0 ? r.start : r.checkpoints[active.next - 1];
+      const h = Math.atan2(cp.x - from.x, cp.z - from.z);
+      g.placeCar(cp.x - Math.sin(h) * 14, cp.z - Math.cos(h) * 14, h);
+      g.vehicle.vx = Math.sin(h) * 15;
+      g.vehicle.vz = Math.cos(h) * 15;
+      g.vehicle.gear = 2;
+    });
+    await sim(page, 1.2);
+  }
+  const runResult = await page.evaluate(() => ({ active: !!window.__nordkamm.openWorld.run, best: window.__nordkamm.openWorld.best('run-city'), toast: document.getElementById('result-toast').textContent }));
+  console.log('city run', runResult);
+  if (runResult.active || !(runResult.best > 0)) throw new Error('checkpoint run did not finish');
+  await shot(page, '15-ow-finish.png');
+  // Speed trap: pass the first one at speed.
+  await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const t = g.data.speedTraps[1];
+    const p = g.data.track.pointAt(t.s - 70, 0, {});
+    g.placeCar(p.x, p.z, p.heading);
+    g.vehicle.vx = Math.sin(p.heading) * 55;
+    g.vehicle.vz = Math.cos(p.heading) * 55;
+    g.vehicle.gear = 5;
+  });
+  await page.keyboard.down('KeyW');
+  await sim(page, 1.6);
+  await page.keyboard.up('KeyW');
+  const trap = await page.evaluate(() => window.__nordkamm.openWorld.best(window.__nordkamm.data.speedTraps[1].id));
+  console.log('speed trap', trap);
+  if (!(trap > 150)) throw new Error(`speed trap did not register: ${trap}`);
+  // Jump: approach a ramp at speed.
+  await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const r = g.data.ramps.find((x) => x.name === 'Westschanze') || g.data.ramps[0];
+    g.placeCar(r.x - Math.sin(r.yaw) * 40, r.z - Math.cos(r.yaw) * 40, r.yaw);
+    g.vehicle.vx = Math.sin(r.yaw) * 28;
+    g.vehicle.vz = Math.cos(r.yaw) * 28;
+    g.vehicle.gear = 3;
+  });
+  await page.keyboard.down('KeyW');
+  await sim(page, 1.4);
+  await shot(page, '16-ow-jump.png');
+  await sim(page, 3);
+  await page.keyboard.up('KeyW');
+  const jump = await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const r = g.data.ramps.find((x) => x.name === 'Westschanze') || g.data.ramps[0];
+    return g.openWorld.best(r.id);
+  });
+  console.log('jump', jump);
+  if (!(jump > 15)) throw new Error(`jump did not register: ${jump}`);
+  // World map
+  await page.keyboard.press('KeyM');
+  await sim(page, 0.1);
+  await shot(page, '17-ow-map.png');
+  await page.keyboard.press('KeyM');
+  if (errors.length) throw new Error(errors.join('\n'));
+  await context.close();
+});
+
 await run('night-free', async () => {
   const { page, context, errors } = await openGame({ name: 'night', settings: { mode: 'free', time: 'night', quality: 'medium', paint: 1, camera: 'chase' } });
   await page.click('#start-btn');
@@ -291,14 +373,25 @@ await run('mobile', async () => {
   await shot(page, '11-mobile-menu.png');
   await page.tap('#start-btn');
   await waitRunning(page);
-  const gas = page.locator('.pedal.gas');
-  await gas.dispatchEvent('pointerdown', { pointerId: 7, pointerType: 'touch', isPrimary: true });
+  const center = async (sel) => {
+    const b = await page.locator(sel).boundingBox();
+    return { clientX: b.x + b.width / 2, clientY: b.y + b.height / 2 };
+  };
+  const zone = page.locator('.pedals');
+  const touch = { pointerId: 7, pointerType: 'touch', isPrimary: true };
+  await zone.dispatchEvent('pointerdown', { ...touch, ...(await center('.pedal.gas')) });
   await sim(page, 5);
   await shot(page, '12-mobile-drive.png');
-  await gas.dispatchEvent('pointerup', { pointerId: 7, pointerType: 'touch', isPrimary: true });
   const s = await state(page);
   console.log('mobile', s);
   if (s.speed < 60) throw new Error(`touch gas did not accelerate: ${s.speed}`);
+  // Slide the same thumb from gas onto the brake: the car must brake.
+  await zone.dispatchEvent('pointermove', { ...touch, ...(await center('.pedal.brake')) });
+  await sim(page, 1.5);
+  const braked = await state(page);
+  console.log('after sliding to brake', braked);
+  if (braked.speed > s.speed - 40) throw new Error(`sliding onto the brake did not brake: ${s.speed} -> ${braked.speed}`);
+  await zone.dispatchEvent('pointerup', touch);
   if (errors.length) throw new Error(errors.join('\n'));
   await context.close();
 });

@@ -47,14 +47,47 @@ check('top speed between 250 and 320 km/h', () => {
   assert.equal(car.gear, 6);
 });
 
-check('100-0 km/h braking distance 30-45 m', () => {
+check('100-0 km/h braking distance 28-36 m', () => {
   const car = new Vehicle();
   car.vz = 100 / 3.6;
   const z0 = car.z;
   run(car, 10, { brake: 1 }, flat, (c) => c.speed < 0.1);
   const d = car.z - z0;
   console.log(`  braking distance: ${d.toFixed(1)} m`);
-  assert.ok(d > 30 && d < 45);
+  assert.ok(d > 28 && d < 36);
+});
+
+check('200-0 km/h stops within 125 m (aero helps at speed)', () => {
+  const car = new Vehicle();
+  car.vz = 200 / 3.6;
+  const z0 = car.z;
+  run(car, 15, { brake: 1 }, flat, (c) => c.speed < 0.1);
+  const d = car.z - z0;
+  console.log(`  200-0 km/h: ${d.toFixed(1)} m`);
+  assert.ok(d < 125);
+});
+
+check('brake overrides a held throttle', () => {
+  const car = new Vehicle();
+  car.vz = 100 / 3.6;
+  const z0 = car.z;
+  run(car, 10, { brake: 1, throttle: 1 }, flat, (c) => c.speed < 0.1);
+  const d = car.z - z0;
+  console.log(`  100-0 with throttle held: ${d.toFixed(1)} m`);
+  assert.ok(d < 36);
+});
+
+check('steering responds quickly at 100 km/h', () => {
+  const car = new Vehicle();
+  car.vz = 100 / 3.6;
+  let steady = 0;
+  const probe = new Vehicle();
+  probe.vz = 100 / 3.6;
+  run(probe, 3, { steer: 0.5, throttle: 0.4 });
+  steady = Math.abs(probe.yawRate);
+  const t = run(car, 3, { steer: 0.5, throttle: 0.4 }, flat, (c) => Math.abs(c.yawRate) > 0.9 * steady);
+  console.log(`  yaw response (90%): ${t.toFixed(2)} s, steady yaw ${steady.toFixed(2)} rad/s`);
+  assert.ok(t < 0.6);
 });
 
 check('steady full-lock cornering at 100 km/h stays stable', () => {

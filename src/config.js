@@ -57,7 +57,7 @@ export const TRACK_POINTS = [
 export const START_POINT = [-820, -600];
 
 export const QUALITY = {
-  low: { pixelRatio: 1, shadows: 0, post: false, trees: 0.35, bloom: false, speedBlur: false, drawDistance: 1400 },
-  medium: { pixelRatio: 1.5, shadows: 1024, post: true, trees: 0.65, bloom: true, speedBlur: false, drawDistance: 2200 },
+  low: { pixelRatio: 1.5, shadows: 0, post: false, trees: 0.35, bloom: false, speedBlur: false, drawDistance: 1400 },
+  medium: { pixelRatio: 1.75, shadows: 1024, post: true, trees: 0.65, bloom: true, speedBlur: false, drawDistance: 2200 },
   high: { pixelRatio: 2, shadows: 2048, post: true, trees: 1, bloom: true, speedBlur: true, drawDistance: 3200 },
 };

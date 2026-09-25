@@ -18,6 +18,7 @@ import { Hud, drawGauge } from './hud.js';
 import { CameraRig, CAMERA_LABELS, CAMERA_MODES } from './camera.js';
 import { StaticColliders } from './collision.js';
 import { carPaintTexture } from './textures.js';
+import { OpenWorld } from './openworld.js';
 import { clamp, formatTime } from './util.js';
 
 const PAINTS = [
@@ -148,7 +149,7 @@ class Game {
   async boot() {
     const fill = document.getElementById('load-fill');
     const text = document.getElementById('load-text');
-    const steps = 14;
+    const steps = 16;
     let done = 0;
     const step = async (label, fn) => {
       text.textContent = label + ' …';
@@ -181,6 +182,7 @@ class Game {
       this.data.placeCity();
       this.data.placeLamps();
     });
+    await step('Open World wird geplant', () => this.data.planActivities());
     await step('Wald wird gepflanzt', () => {
       this.data.placeVegetation();
       this.data.placeBillboards();
@@ -198,6 +200,10 @@ class Game {
       this.world.buildBackdrop();
     });
     await step('Autos', () => this.#createCars());
+    await step('Checkpoints, Zonen, Schanzen', () => {
+      this.openWorld = new OpenWorld(this);
+      this.openWorld.build();
+    });
     await step('Tageszeit', () => this.world.setTimeOfDay(this.settings.time));
     this.effects = new Effects(this.scene);
     this.audio = new GameAudio();
@@ -304,6 +310,7 @@ class Game {
     const old = mat.map;
     mat.map = carPaintTexture(p.color, p.stripe, 7);
     mat.needsUpdate = true;
+    this.playerModel.paintPlain.color.set(p.color);
     if (old) old.dispose();
   }
 
@@ -460,6 +467,11 @@ class Game {
     });
     $('btn-camera').addEventListener('click', () => this.#cycleCamera());
     $('btn-pause').addEventListener('click', () => this.pause());
+    $('btn-map').addEventListener('click', () => this.input.taps.add('map'));
+    $('abort-btn').addEventListener('click', () => {
+      this.openWorld.cancelRun();
+      this.resume();
+    });
     $('portrait-ok').addEventListener('click', () => {
       this.portraitDismissed = true;
       $('portrait').hidden = true;
@@ -476,6 +488,7 @@ class Game {
   }
 
   #syncPauseLabels() {
+    document.getElementById('abort-btn').hidden = !this.openWorld?.runActive;
     document.getElementById('sound-btn').textContent = `Ton: ${this.settings.muted ? 'aus' : 'an'}`;
     document.getElementById('lights-btn').textContent = `Licht: ${this.#headlightsOn() ? 'an' : 'aus'}`;
     document.getElementById('camera-btn').textContent = `Kamera: ${CAMERA_LABELS[this.rig.mode]}`;
@@ -549,6 +562,18 @@ class Game {
     this.playerIdx = p.index;
   }
 
+  // Put the player car on the ground at (x, z) facing `heading`, at rest.
+  placeCar(x, z, heading) {
+    const tr = this.data.track;
+    const q = tr.nearest(x, z, -1, {});
+    const y = this.data.groundHeight(x, z, q);
+    this.vehicle.reset(x, y, z, heading);
+    this.vehicle.groundY = y;
+    this.wheelHints.fill(q.index >= 0 ? q.index : -1);
+    if (q.index >= 0) this.playerIdx = q.index;
+    this.effects.trails.clear();
+  }
+
   #placeMenuScene() {
     // Player car on the grid, rivals around it: a static showroom.
     const mode = this.settings.mode;
@@ -586,6 +611,10 @@ class Game {
     this.#refreshBest();
     this.audio?.silence();
     this.#applyLights();
+    this.openWorld?.setEnabled(false);
+    document.getElementById('worldmap').hidden = true;
+    const t = this.openWorld?.totals();
+    if (t) document.getElementById('stars-tag').textContent = `★ ${t.stars}/${t.max}`;
   }
 
   start() {
@@ -680,6 +709,9 @@ class Game {
       e.startProgress = e.progress;
     }
     this.vehicle.gear = this.mode === 'free' ? 1 : 0;
+    this.openWorld.setEnabled(this.mode === 'free');
+    document.getElementById('btn-map').hidden = this.mode !== 'free';
+    document.getElementById('worldmap').hidden = true;
     this.#applyLights();
     if (this.mode === 'free') {
       this.state = 'running';
@@ -757,13 +789,14 @@ class Game {
     vin.manual = this.settings.gearbox === 'manual';
     vin.shiftUp = this.input.consume('shiftUp');
     vin.shiftDown = this.input.consume('shiftDown');
-    const counting = this.state === 'countdown';
+    // Held in place during a race start or an open-world run countdown (engine can be revved).
+    const counting = this.state === 'countdown' || !!this.openWorld?.holding;
     if (counting && !this.gridPose) this.gridPose = { x: v.x, z: v.z, yaw: v.yaw };
     if (!counting) this.gridPose = null;
     if (counting) {
       v.gear = 0;
       vin.shiftUp = vin.shiftDown = false;
-    }
+    } else if (v.gear === 0 && this.state !== 'countdown') v.gear = 1;
 
     const step = 1 / 120;
     this.acc += dt;
@@ -821,7 +854,7 @@ class Game {
         rubber = clamp(1 - (gap / 1500) * 0.06, 0.93, 1.05);
         if (e.finished) rubber = 0.6;
       }
-      a.update(dt, all, { race: this.mode === 'race', rubber, frozen: counting });
+      a.update(dt, all, { race: this.mode === 'race', rubber, frozen: this.state === 'countdown' });
     }
     this.#collideCars();
   }
@@ -925,6 +958,12 @@ class Game {
   }
 
   #respawn() {
+    const pose = this.openWorld?.respawnPose();
+    if (pose) {
+      this.placeCar(pose.x, pose.z, pose.heading);
+      this.hud.message('Zurück zum letzten Tor', 1, 'info');
+      return;
+    }
     const v = this.vehicle;
     const tr = this.data.track;
     let q = tr.nearest(v.x, v.z, this.playerIdx, {});
@@ -1140,7 +1179,12 @@ class Game {
       this.#applyLights();
       this.#toast(`Licht ${this.#headlightsOn() ? 'an' : 'aus'}`);
     }
-    if (inp.consume('map')) this.hud.bigMap = !this.hud.bigMap;
+    if (inp.consume('map')) {
+      if (this.mode === 'free') {
+        const map = document.getElementById('worldmap');
+        map.hidden = !map.hidden;
+      } else this.hud.bigMap = !this.hud.bigMap;
+    }
     if (inp.consume('reset') && this.state === 'running' && this.respawnTimer <= 0) this.#respawn();
   }
 
@@ -1184,7 +1228,10 @@ class Game {
     this.hud.drawGauge(v);
     if (this.frameCount % 2 === 0) {
       const cars = this.ai.map((a) => ({ x: a.x, z: a.z, color: a.color }));
-      this.hud.drawMinimap(v, cars);
+      const markers = this.openWorld.enabled ? this.openWorld.markers() : [];
+      this.hud.drawMinimap(v, cars, markers);
+      const map = document.getElementById('worldmap');
+      if (!map.hidden && this.frameCount % 4 === 0) this.hud.drawWorldMap(map, v, cars, markers, this.openWorld.totals());
     }
     const race = this.race;
     if (race) {
@@ -1251,7 +1298,10 @@ class Game {
     } else if (this.state === 'running' || this.state === 'countdown' || this.state === 'finished') {
       this.#simulate(dt);
       this.#updateRace(dt);
-      if (this.mode === 'free') this.#updateDrift(dt);
+      if (this.mode === 'free') {
+        this.#updateDrift(dt);
+        this.openWorld.update(dt, v, this.playerQ);
+      }
       this.playerModel.update(v);
       const braking = v.gear > 0 ? v.brake : v.gear < 0 ? v.throttle : 0;
       this.playerModel.setLights({ headlights: this.#headlightsOn(), brake: braking > 0.05 ? 1 : 0, reverse: v.gear < 0 });
@@ -1286,8 +1336,10 @@ class Game {
     f.frames = 0;
     if (this.state !== 'running') return;
     let pr = this.pixelRatio;
-    if (f.value < 40 && pr > 0.6) pr = Math.max(0.6, pr - 0.15);
-    else if (f.value > 57 && pr < this.maxPixelRatio) pr = Math.min(this.maxPixelRatio, pr + 0.1);
+    // Trade resolution for frame rate, but never drop so far that the image turns to mush.
+    const floor = Math.min(this.maxPixelRatio, 0.85);
+    if (f.value < 40 && pr > floor) pr = Math.max(floor, pr - 0.1);
+    else if (f.value > 55 && pr < this.maxPixelRatio) pr = Math.min(this.maxPixelRatio, pr + 0.1);
     if (Math.abs(pr - this.pixelRatio) > 0.01) {
       this.pixelRatio = pr;
       this.renderer.setPixelRatio(pr);

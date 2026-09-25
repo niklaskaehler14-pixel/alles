@@ -1,5 +1,6 @@
-// Closed race track: centripetal Catmull-Rom spline resampled at a fixed spacing,
-// with fast nearest-point queries used by physics, AI and race logic.
+// Road centre lines: centripetal Catmull-Rom splines resampled at a fixed spacing, with fast
+// nearest-point queries used by physics, AI, race logic and the map. The race circuit is a
+// closed loop; the open-world branch roads are open (dead ends or junction to junction).
 
 function catmullRomPoint(p0, p1, p2, p3, t, alpha = 0.5) {
   // Barry-Goldman pyramidal formulation of the centripetal Catmull-Rom spline.
@@ -22,31 +23,44 @@ function catmullRomPoint(p0, p1, p2, p3, t, alpha = 0.5) {
 }
 
 export class Track {
-  constructor(controlPoints, spacing = 2) {
+  constructor(controlPoints, spacing = 2, { closed = true } = {}) {
     this.spacing = spacing;
+    this.closed = closed;
     const n = controlPoints.length;
+    // Open roads get mirrored phantom points so the spline starts and ends at the first and last point.
+    const ctrl = (i) => {
+      if (closed) return controlPoints[(i + n) % n];
+      if (i < 0) return [2 * controlPoints[0][0] - controlPoints[1][0], 2 * controlPoints[0][1] - controlPoints[1][1]];
+      if (i >= n) return [2 * controlPoints[n - 1][0] - controlPoints[n - 2][0], 2 * controlPoints[n - 1][1] - controlPoints[n - 2][1]];
+      return controlPoints[i];
+    };
 
     // Dense polyline through the spline.
     const dense = [];
     const sub = 60;
-    for (let i = 0; i < n; i++) {
-      const p0 = controlPoints[(i - 1 + n) % n];
-      const p1 = controlPoints[i];
-      const p2 = controlPoints[(i + 1) % n];
-      const p3 = controlPoints[(i + 2) % n];
+    const segments = closed ? n : n - 1;
+    for (let i = 0; i < segments; i++) {
+      const p0 = ctrl(i - 1);
+      const p1 = ctrl(i);
+      const p2 = ctrl(i + 1);
+      const p3 = ctrl(i + 2);
       for (let k = 0; k < sub; k++) dense.push(catmullRomPoint(p0, p1, p2, p3, k / sub));
     }
+    if (!closed) dense.push(controlPoints[n - 1]);
     const cum = [0];
-    for (let i = 1; i <= dense.length; i++) {
+    const last = closed ? dense.length : dense.length - 1;
+    for (let i = 1; i <= last; i++) {
       const a = dense[i - 1];
       const b = dense[i % dense.length];
       cum.push(cum[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1]));
     }
     const total = cum[cum.length - 1];
-    const count = Math.round(total / spacing);
+    // A closed loop of `count` samples has `count` gaps, an open road `count - 1`.
+    const gaps = Math.max(1, Math.round(total / spacing));
+    const count = closed ? gaps : gaps + 1;
     this.count = count;
-    this.length = count * spacing;
-    this.spacing = total / count;
+    this.spacing = total / gaps;
+    this.length = gaps * this.spacing;
 
     this.x = new Float32Array(count);
     this.z = new Float32Array(count);
@@ -58,18 +72,18 @@ export class Track {
     let j = 0;
     for (let i = 0; i < count; i++) {
       const s = i * this.spacing;
-      while (j < dense.length - 1 && cum[j + 1] < s) j++;
+      while (j < cum.length - 2 && cum[j + 1] < s) j++;
       const a = dense[j];
       const b = dense[(j + 1) % dense.length];
       const seg = cum[j + 1] - cum[j] || 1;
-      const f = (s - cum[j]) / seg;
+      const f = Math.min(1, (s - cum[j]) / seg);
       this.x[i] = a[0] + (b[0] - a[0]) * f;
       this.z[i] = a[1] + (b[1] - a[1]) * f;
     }
 
     for (let i = 0; i < count; i++) {
-      const p = (i - 1 + count) % count;
-      const q = (i + 1) % count;
+      const p = this.wrapIndex(i - 1);
+      const q = this.wrapIndex(i + 1);
       const dx = this.x[q] - this.x[p];
       const dz = this.z[q] - this.z[p];
       const len = Math.hypot(dx, dz) || 1;
@@ -80,19 +94,19 @@ export class Track {
     // Signed curvature (positive = turning left), smoothed.
     const raw = new Float32Array(count);
     for (let i = 0; i < count; i++) {
-      const p = (i - 2 + count) % count;
-      const q = (i + 2) % count;
+      const p = this.wrapIndex(i - 2);
+      const q = this.wrapIndex(i + 2);
       const a1 = Math.atan2(this.tx[p], this.tz[p]);
       const a2 = Math.atan2(this.tx[q], this.tz[q]);
       let d = a2 - a1;
       while (d > Math.PI) d -= 2 * Math.PI;
       while (d < -Math.PI) d += 2 * Math.PI;
-      raw[i] = d / (4 * this.spacing);
+      raw[i] = d / ((closed ? 4 : Math.max(1, q - p)) * this.spacing);
     }
     const w = 6;
     for (let i = 0; i < count; i++) {
       let sum = 0;
-      for (let k = -w; k <= w; k++) sum += raw[(i + k + count) % count];
+      for (let k = -w; k <= w; k++) sum += raw[this.wrapIndex(i + k)];
       this.curv[i] = sum / (2 * w + 1);
     }
 
@@ -116,13 +130,16 @@ export class Track {
     this.grid = cells;
   }
 
+  // Closed loops wrap around, open roads clamp to their ends.
   wrapIndex(i) {
     const c = this.count;
+    if (!this.closed) return i < 0 ? 0 : i >= c ? c - 1 : i;
     return ((i % c) + c) % c;
   }
 
   wrapS(s) {
     const L = this.length;
+    if (!this.closed) return s < 0 ? 0 : s > L ? L : s;
     return ((s % L) + L) % L;
   }
 
@@ -227,9 +244,10 @@ export class Track {
   // Position on the centre line (optionally offset to the left) at arc length s.
   pointAt(s, lateral = 0, out = {}) {
     const f = this.wrapS(s) / this.spacing;
-    const a = Math.floor(f) % this.count;
-    const b = (a + 1) % this.count;
-    const t = f - Math.floor(f);
+    let a = Math.floor(f) % this.count;
+    if (!this.closed) a = Math.min(a, this.count - 2);
+    const b = this.wrapIndex(a + 1);
+    const t = Math.min(1, f - a);
     let tx = this.tx[a] + (this.tx[b] - this.tx[a]) * t;
     let tz = this.tz[a] + (this.tz[b] - this.tz[a]) * t;
     const tl = Math.hypot(tx, tz) || 1;
@@ -246,7 +264,7 @@ export class Track {
   }
 
   curvatureAt(s) {
-    const i = Math.round(this.wrapS(s) / this.spacing) % this.count;
+    const i = this.wrapIndex(Math.round(this.wrapS(s) / this.spacing) % (this.closed ? this.count : Infinity));
     return this.curv[i];
   }
 

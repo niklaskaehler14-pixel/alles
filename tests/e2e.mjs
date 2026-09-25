@@ -289,11 +289,94 @@ await run('openworld', async () => {
   });
   console.log('jump', jump);
   if (!(jump > 15)) throw new Error(`jump did not register: ${jump}`);
-  // World map
+  // Speed zone: enter the first gate at speed and hold it to the end.
+  await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const z = g.data.speedZones[0];
+    const p = z.road.pointAt(z.s0 - 40, 0, {});
+    g.placeCar(p.x, p.z, p.heading);
+    g.vehicle.vx = Math.sin(p.heading) * 40;
+    g.vehicle.vz = Math.cos(p.heading) * 40;
+    g.vehicle.gear = 4;
+  });
+  await page.keyboard.down('KeyW');
+  for (let i = 0; i < 16; i++) {
+    await page.evaluate(() => {
+      // Keep the car on the zone's centre line (steering is not part of this check).
+      const g = window.__nordkamm;
+      const z = g.data.speedZones[0];
+      const v = g.vehicle;
+      const q = z.road.nearest(v.x, v.z, -1, {}, 2);
+      const p = z.road.pointAt(q.s, 0, {});
+      v.x = p.x;
+      v.z = p.z;
+      v.yaw = p.heading;
+      const sp = Math.max(v.speed, 40);
+      v.vx = Math.sin(p.heading) * sp;
+      v.vz = Math.cos(p.heading) * sp;
+      v.yawRate = 0;
+    });
+    await sim(page, 0.8);
+  }
+  await page.keyboard.up('KeyW');
+  const zone = await page.evaluate(() => window.__nordkamm.openWorld.best(window.__nordkamm.data.speedZones[0].id));
+  console.log('speed zone', zone);
+  if (!(zone > 100)) throw new Error(`speed zone did not register: ${zone}`);
+  // Bonus board: drive through one.
+  const board = await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const b = g.data.bonusBoards[0];
+    const h = b.yaw;
+    g.placeCar(b.x - Math.sin(h) * 20, b.z - Math.cos(h) * 20, h);
+    g.vehicle.vx = Math.sin(h) * 14;
+    g.vehicle.vz = Math.cos(h) * 14;
+    g.vehicle.gear = 2;
+    const xp = g.career.xp;
+    g.simulateFor(2);
+    return { smashed: g.career.boards.has(b.id), xp: g.career.xp - xp };
+  });
+  console.log('bonus board', board);
+  if (!board.smashed || board.xp < 1000) throw new Error(`bonus board not smashed: ${JSON.stringify(board)}`);
+  // World map: pauses the game, a click on the festival opens its card, fast travel brings us there.
   await page.keyboard.press('KeyM');
   await sim(page, 0.1);
+  if ((await page.evaluate(() => window.__nordkamm.state)) !== 'map') throw new Error('map did not open');
   await shot(page, '17-ow-map.png');
-  await page.keyboard.press('KeyM');
+  const fest = await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const f = g.data.festival;
+    g.worldMap.view.x = f.x;
+    g.worldMap.view.z = f.z;
+    g.worldMap.draw();
+    return g.worldMap.toScreen(f.x, f.z);
+  });
+  await page.mouse.click(fest[0], fest[1]);
+  await sleep(200);
+  const card = await page.evaluate(() => ({ title: document.getElementById('wm-card-title').textContent, travel: !document.getElementById('wm-travel').disabled }));
+  console.log('map card', card);
+  if (card.title !== 'Nordkamm Festival' || !card.travel) throw new Error(`festival card wrong: ${JSON.stringify(card)}`);
+  await shot(page, '18-ow-map-card.png');
+  await page.click('#wm-travel');
+  await sleep(800);
+  await sim(page, 0.3);
+  const arrived = await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const f = g.data.festival.spawn;
+    return { state: g.state, dist: Math.round(Math.hypot(g.vehicle.x - f.x, g.vehicle.z - f.z)) };
+  });
+  console.log('fast travel', arrived);
+  if (arrived.state !== 'running' || arrived.dist > 12) throw new Error(`fast travel failed: ${JSON.stringify(arrived)}`);
+  // GPS: a route to the Kaminari pass over the road network.
+  const gps = await page.evaluate(() => {
+    const g = window.__nordkamm;
+    const m = g.data.landmarks.find((l) => l.id === 'lm-pass');
+    g.gps.set(m.x, m.z, m.name);
+    g.simulateFor(0.5);
+    return { active: g.gps.active, length: Math.round(g.gps.route.length), box: !document.getElementById('gps').hidden };
+  });
+  console.log('gps', gps);
+  if (!gps.active || !(gps.length > 500) || !gps.box) throw new Error(`gps route missing: ${JSON.stringify(gps)}`);
+  await shot(page, '19-ow-gps.png');
   if (errors.length) throw new Error(errors.join('\n'));
   await context.close();
 });
@@ -350,6 +433,26 @@ await run('night-free', async () => {
   await page.keyboard.up('KeyW');
   console.log('drift points', drift);
   if (drift <= 0) throw new Error('drift scoring did not register');
+  // Photo mode: V freezes the game, the orbit camera frames the car, a photo can be taken.
+  await page.keyboard.press('KeyV');
+  await sim(page, 0.05);
+  if ((await page.evaluate(() => window.__nordkamm.state)) !== 'photo') throw new Error('photo mode did not open');
+  const surface = page.locator('#photo-surface');
+  const box = await surface.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2 - 40, { steps: 5 });
+  await page.mouse.up();
+  await page.click('#photo-take');
+  await sleep(300);
+  const photo = await page.evaluate(() => ({ src: document.getElementById('photo-img').src.slice(0, 22), shown: !document.getElementById('photo-shot').hidden }));
+  console.log('photo', photo);
+  if (!photo.shown || !photo.src.startsWith('data:image/jpeg')) throw new Error('photo was not taken');
+  await page.click('#photo-shot-close');
+  await shot(page, '22-photo-mode.png');
+  await page.keyboard.press('Escape');
+  await sim(page, 0.05);
+  if ((await page.evaluate(() => window.__nordkamm.state)) !== 'running') throw new Error('photo mode did not close');
   if (errors.length) throw new Error(errors.join('\n'));
   await context.close();
 });
@@ -392,6 +495,36 @@ await run('mobile', async () => {
   console.log('after sliding to brake', braked);
   if (braked.speed > s.speed - 40) throw new Error(`sliding onto the brake did not brake: ${s.speed} -> ${braked.speed}`);
   await zone.dispatchEvent('pointerup', touch);
+  if (errors.length) throw new Error(errors.join('\n'));
+  await context.close();
+});
+
+await run('mobile-map', async () => {
+  const { page, context, errors } = await openGame({ name: 'mobile-map', viewport: { width: 844, height: 390 }, touch: true, settings: { mode: 'free', time: 'day', quality: 'low', paint: 0 } });
+  await page.tap('#start-btn');
+  await waitRunning(page);
+  await sim(page, 1);
+  await shot(page, '20-mobile-free.png');
+  await page.tap('#btn-map');
+  await sim(page, 0.1);
+  if ((await page.evaluate(() => window.__nordkamm.state)) !== 'map') throw new Error('map did not open on touch');
+  // Two-finger pinch zooms out.
+  const before = await page.evaluate(() => window.__nordkamm.worldMap.view.ppm);
+  const cv = page.locator('#wm-canvas');
+  const t = (id, x, y) => ({ pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: y });
+  await cv.dispatchEvent('pointerdown', t(1, 300, 200));
+  await cv.dispatchEvent('pointerdown', t(2, 540, 200));
+  await cv.dispatchEvent('pointermove', t(1, 380, 200));
+  await cv.dispatchEvent('pointermove', t(2, 460, 200));
+  await cv.dispatchEvent('pointerup', t(1, 380, 200));
+  await cv.dispatchEvent('pointerup', t(2, 460, 200));
+  const after = await page.evaluate(() => window.__nordkamm.worldMap.view.ppm);
+  console.log('pinch zoom', before.toFixed(3), '->', after.toFixed(3));
+  if (!(after < before * 0.8)) throw new Error('pinch did not zoom out');
+  await shot(page, '21-mobile-map.png');
+  await page.tap('#wm-close');
+  await sim(page, 0.1);
+  if ((await page.evaluate(() => window.__nordkamm.state)) !== 'running') throw new Error('map did not close');
   if (errors.length) throw new Error(errors.join('\n'));
   await context.close();
 });

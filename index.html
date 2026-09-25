@@ -99,6 +99,8 @@
   .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
   .swatch { width: 36px; height: 36px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 2px rgba(0,0,0,0.35); }
   .swatch[aria-pressed="true"] { border-color: var(--ice); }
+  .swatch.locked { position: relative; filter: grayscale(0.7) brightness(0.55); cursor: not-allowed; }
+  .swatch.locked::after { content: attr(data-level); position: absolute; inset: 0; display: grid; place-items: center; font: 800 12px var(--mono); color: #fff; text-shadow: 0 1px 3px #000; }
   .primary {
     appearance: none; border: 0; cursor: pointer; border-radius: 10px; padding: 16px 20px;
     background: var(--amber); color: #1a1206; font: 900 26px/1 var(--display); letter-spacing: 0.04em; text-transform: uppercase;
@@ -124,7 +126,54 @@
   .cell .v.mono { font: 700 18px/1.3 var(--mono); }
   .cell .v.best { color: var(--pine); }
   #pos-value { color: var(--amber); font-size: 40px; }
-  #drift-current { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); font: 900 44px/1 var(--display); color: var(--amber); text-shadow: 0 2px 18px rgba(0,0,0,0.6); letter-spacing: 0.02em; }
+  #level-block { min-width: 118px; }
+  #level-value { color: var(--amber); }
+  .xpbar { display: block; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.12); overflow: hidden; margin-top: 3px; }
+  .xpbar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #ff3fa4, var(--amber)); transition: width 0.4s ease; }
+  .cell .k.xp { letter-spacing: 0.04em; text-transform: none; font-size: 10px; }
+  /* Skill chain: bottom centre on desktop */
+  #skills { position: absolute; left: 50%; bottom: calc(64px + var(--safe-b)); transform: translateX(-50%); width: max-content; display: grid; justify-items: center; gap: 4px; min-width: 220px; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
+  #skill-feed { display: grid; justify-items: center; gap: 1px; }
+  #skill-feed div { font: 800 17px/1.1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ice); opacity: 0.9; }
+  #skill-feed div:first-child { font-size: 22px; color: #ffd24a; opacity: 1; }
+  #skill-feed div b { font-family: var(--mono); font-weight: 700; margin-left: 8px; font-size: 0.8em; }
+  .skill-total { display: flex; align-items: baseline; gap: 10px; }
+  .skill-total b { font: 900 46px/1 var(--display); color: var(--ice); letter-spacing: 0.02em; }
+  .skill-total span { font: 900 30px/1 var(--display); color: #ff3fa4; }
+  .skill-timer { width: 180px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.15); overflow: hidden; }
+  .skill-timer i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #ff3fa4, #ffd24a); }
+  #skills.banked .skill-total b { color: #7dff7a; }
+  #skills.broken .skill-total b { color: var(--signal); text-decoration: line-through; }
+  /* GPS next to the minimap */
+  #gps { position: absolute; top: calc(22px + var(--safe-t)); right: calc(196px + var(--safe-r)); display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border-radius: 10px; background: var(--panel); border-left: 3px solid #b98cff; }
+  #gps-arrow { width: 34px; height: 34px; transition: transform 0.1s linear; }
+  #gps div { display: grid; }
+  #gps-name { font: 600 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: #cdb6ff; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #gps-dist { font: 700 18px var(--mono); }
+  /* Discovery / level banner */
+  #banner { position: absolute; left: 50%; top: 12%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; display: grid; justify-items: center; gap: 2px; padding: 10px 26px 12px; border-radius: 12px; background: linear-gradient(90deg, rgba(255,63,164,0.18), rgba(11,16,22,0.86) 30%, rgba(11,16,22,0.86) 70%, rgba(242,165,65,0.18)); border-top: 3px solid #ff3fa4; text-align: center; animation: banner-in 0.45s ease-out; }
+  #banner-kind { font: 700 12px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; color: #ff7cc4; }
+  #banner-title { font: 900 38px/1 var(--display); text-transform: uppercase; letter-spacing: 0.03em; }
+  #banner-sub { font: 600 14px var(--body); color: var(--amber); }
+  @keyframes banner-in { from { opacity: 0; transform: translate(-50%, -12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  /* XP feed on the right */
+  #feed { position: absolute; right: calc(16px + var(--safe-r)); top: calc(244px + var(--safe-t)); display: grid; justify-items: end; gap: 6px; }
+  #feed div { padding: 5px 10px; border-radius: 8px; background: var(--panel); font: 700 14px var(--body); border-right: 3px solid var(--amber); animation: feed-in 0.3s ease-out; }
+  #feed div b { font-family: var(--mono); color: var(--amber); margin-right: 6px; }
+  #feed div.out { opacity: 0; transition: opacity 0.5s ease; }
+  @keyframes feed-in { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+  #photo { position: fixed; inset: 0; z-index: 26; }
+  #photo-surface { position: absolute; inset: 0; cursor: grab; touch-action: none; }
+  .photo-bar { position: absolute; left: 50%; bottom: calc(18px + var(--safe-b)); transform: translateX(-50%); width: max-content; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); max-width: calc(100% - 32px); box-sizing: border-box; flex-wrap: wrap; justify-content: center; }
+  .photo-bar .primary { font-size: 20px; padding: 10px 22px; }
+  .photo-fov { display: flex; align-items: center; gap: 8px; font: 600 13px var(--body); color: var(--mist); }
+  .photo-fov input { width: 130px; accent-color: var(--amber); }
+  .photo-hint { position: absolute; left: 0; right: 0; top: calc(16px + var(--safe-t)); text-align: center; color: var(--ice); font: 600 13px var(--body); text-shadow: 0 1px 6px rgba(0,0,0,0.7); pointer-events: none; }
+  .photo-dialog { width: min(760px, 100%); }
+  .photo-dialog img { width: 100%; border-radius: 8px; display: block; }
+  .photo-dialog a.primary { text-align: center; text-decoration: none; }
+  #fade { position: fixed; inset: 0; background: #06090d; z-index: 36; opacity: 0; transition: opacity 0.35s ease; pointer-events: none; }
+  #fade.on { opacity: 1; }
   #minimap { position: absolute; top: calc(14px + var(--safe-t)); right: calc(14px + var(--safe-r)); width: 168px; height: 168px; border-radius: 50%; }
   #gauge { position: absolute; right: calc(18px + var(--safe-r)); bottom: calc(18px + var(--safe-b)); width: 210px; height: 210px; }
   #message {
@@ -197,12 +246,68 @@
   #nav { position: absolute; left: 50%; top: calc(150px + var(--safe-t)); transform: translateX(-50%); display: grid; justify-items: center; gap: 2px; }
   #nav-arrow { width: 54px; height: 54px; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.6)); transition: transform 0.08s linear; }
   #nav-dist { font: 700 14px var(--mono); background: var(--panel); padding: 2px 8px; border-radius: 6px; }
-  #prompt { position: absolute; left: 50%; bottom: calc(120px + var(--safe-b)); transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: var(--panel); border-left: 4px solid #3fd0ff; font: 600 15px var(--body); white-space: nowrap; }
+  #prompt { position: absolute; left: 50%; bottom: calc(210px + var(--safe-b)); transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: var(--panel); border-left: 4px solid #3fd0ff; font: 600 15px var(--body); white-space: nowrap; }
   #result-toast { position: absolute; left: 50%; top: 46%; transform: translateX(-50%); padding: 10px 18px; border-radius: 10px; background: var(--panel); font: 700 17px var(--body); white-space: nowrap; color: #ffd24a; }
   #flash { position: fixed; inset: 0; background: #fff; pointer-events: none; z-index: 20; opacity: 0; }
   #flash.go { animation: flash 0.45s ease-out; }
   @keyframes flash { 0% { opacity: 0.85; } 100% { opacity: 0; } }
-  #worldmap { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 25; pointer-events: none; }
+  /* ---------- world map ---------- */
+  #worldmap { position: fixed; inset: 0; z-index: 25; background: #0b1117; touch-action: none; }
+  #wm-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  .wm-top { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: flex-start; gap: 18px; padding: calc(14px + var(--safe-t)) calc(16px + var(--safe-r)) 28px calc(16px + var(--safe-l)); background: linear-gradient(rgba(6,9,13,0.92), rgba(6,9,13,0)); pointer-events: none; }
+  .wm-top > * { pointer-events: auto; }
+  .wm-title { display: grid; gap: 2px; min-width: 180px; }
+  .wm-title b { font: 900 34px/0.95 var(--display); text-transform: uppercase; letter-spacing: 0.03em; }
+  .wm-stats { display: flex; flex-wrap: wrap; gap: 1px; background: var(--line); border-radius: 10px; overflow: hidden; margin-left: auto; }
+  .wm-stats > div { background: var(--panel); padding: 6px 12px 8px; display: grid; gap: 1px; min-width: 64px; }
+  .wm-stats .k { font: 600 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mist); }
+  .wm-stats .v { font: 800 22px/1 var(--display); letter-spacing: 0.02em; }
+  .wm-close { flex: none; }
+  .wm-filters { position: absolute; left: calc(16px + var(--safe-l)); bottom: calc(56px + var(--safe-b)); display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 120px); }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; font: 600 13px var(--body); }
+  .chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .chip[aria-pressed="false"] { opacity: 0.45; }
+  .chip[aria-pressed="false"] i { background: transparent !important; box-shadow: inset 0 0 0 2px var(--mist); }
+  .wm-zoom { position: absolute; right: calc(16px + var(--safe-r)); bottom: calc(56px + var(--safe-b)); display: grid; gap: 8px; }
+  .wm-card { position: absolute; right: calc(16px + var(--safe-r)); top: calc(96px + var(--safe-t)); width: min(320px, calc(100% - 32px)); box-sizing: border-box; padding: 16px 18px 14px; border-radius: 14px; background: var(--panel-solid); border: 1px solid var(--line); border-top: 4px solid var(--kind, var(--amber)); display: grid; gap: 8px; box-shadow: 0 18px 40px rgba(0,0,0,0.45); }
+  .wm-card-kind { font: 700 11px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--kind, var(--amber)); }
+  .wm-card h3 { margin: 0; font: 900 30px/0.95 var(--display); text-transform: uppercase; letter-spacing: 0.02em; padding-right: 28px; }
+  .wm-card p { margin: 0; color: var(--mist); font-size: 14px; }
+  .wm-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+  .wm-card dt { color: var(--mist); }
+  .wm-card dd { margin: 0; font-family: var(--mono); text-align: right; }
+  .wm-card-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .wm-card-actions > * { flex: 1; }
+  .wm-card-actions .primary { font-size: 20px; padding: 12px 10px; }
+  .wm-card-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .wm-card-close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 0; border-radius: 8px; background: rgba(255,255,255,0.06); display: grid; place-items: center; cursor: pointer; }
+  .wm-card-close svg, .wm-close svg, .wm-zoom svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .wm-hints { position: absolute; left: 0; right: 0; bottom: calc(14px + var(--safe-b)); display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 16px; color: var(--mist); font: 500 12px var(--body); pointer-events: none; }
+  .wm-hints kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--ice); }
+  body.touch .wm-hints { display: none; }
+  body.touch .wm-filters { bottom: calc(14px + var(--safe-b)); max-width: calc(100% - 90px); }
+  body.touch .wm-zoom { bottom: calc(14px + var(--safe-b)); }
+  body.touch #skills { bottom: auto; top: calc(108px + var(--safe-t)); }
+  body.touch .skill-total b { font-size: 32px; }
+  body.touch #skill-feed div { font-size: 14px; }
+  body.touch #skill-feed div:first-child { font-size: 17px; }
+  body.touch #gps { top: auto; bottom: calc(210px + var(--safe-b)); right: calc(16px + var(--safe-r)); }
+  body.touch #feed { top: calc(190px + var(--safe-t)); }
+  body.touch #banner { top: calc(148px + var(--safe-t)); padding: 6px 18px 8px; }
+  body.touch #banner-title { font-size: 24px; }
+  @media (max-width: 720px), (max-height: 520px) {
+    .wm-top { flex-wrap: wrap; gap: 8px; padding-bottom: 12px; }
+    .wm-title b { font-size: 24px; }
+    .wm-stats { order: 3; width: 100%; margin-left: 0; }
+    .wm-stats > div { flex: 1; min-width: 0; padding: 4px 8px 5px; }
+    .wm-stats .v { font-size: 17px; }
+    .wm-close { margin-left: auto; }
+    .wm-card { top: auto; bottom: calc(60px + var(--safe-b)); right: 50%; transform: translateX(50%); width: min(420px, calc(100% - 24px)); gap: 6px; padding: 12px 14px; }
+    .wm-card h3 { font-size: 22px; }
+    .wm-card p { font-size: 12px; }
+    .wm-card dl { display: none; }
+    #gps { right: calc(146px + var(--safe-r)); }
+  }
   body.touch #activity { top: calc(150px + var(--safe-t)); max-width: calc(100% - 32px); }
   body.touch #nav { top: calc(240px + var(--safe-t)); }
   body.touch #prompt { bottom: auto; top: calc(150px + var(--safe-t)); }
@@ -246,7 +351,7 @@
     <div class="menu-head">
       <div class="eyebrow">Seeufer-Ring · offene Welt</div>
       <h1 class="brand">Nordkamm <span>GT</span></h1>
-      <p>Ein 8-km-Rundkurs durch Stadt, Nordkamm-Pass, Seeufer und Wald. Abseits der Strecke ist die ganze Welt befahrbar.</p>
+      <p>Ein 8-km-Rundkurs, ein Touge über den Kaminari-Pass und eine offene Welt mit Festival, Seestraße und Schotterpisten.</p>
     </div>
     <div class="track-card">
       <canvas id="track-thumb" width="224" height="224" aria-label="Streckenkarte"></canvas>
@@ -260,7 +365,7 @@
     <div class="group">
       <div class="group-label">Modus</div>
       <div class="modes" id="modes">
-        <button class="mode" data-mode="free" aria-pressed="false"><b>Open World</b><small>Checkpoint-Läufe, Drift-Zonen, Blitzer und Schanzen</small><span class="tag" id="stars-tag">★ 0/48</span></button>
+        <button class="mode" data-mode="free" aria-pressed="false"><b>Open World</b><small>Festival, Touge-Pass, Läufe, PR-Stunts, Bonusschilder und Skill-Ketten</small><span class="tag" id="stars-tag">★ 0</span></button>
         <button class="mode" data-mode="race" aria-pressed="true"><b>Rennen</b><small>Gegen 5 Fahrer, Startaufstellung</small><span class="tag">KI ×5</span></button>
         <button class="mode" data-mode="time" aria-pressed="false"><b>Zeitfahren</b><small>Allein auf der Strecke, jage deine Bestzeit</small><span class="tag">Runden</span></button>
       </div>
@@ -297,7 +402,7 @@
     <div class="keys" id="keys-help">
       <div><kbd>W</kbd>/<kbd>↑</kbd> Gas · <kbd>S</kbd>/<kbd>↓</kbd> Bremse/Rückwärts · <kbd>A</kbd><kbd>D</kbd> Lenken</div>
       <div><kbd>Leertaste</kbd> Handbremse · <kbd>C</kbd> Kamera · <kbd>R</kbd> Zurück auf die Strecke</div>
-      <div><kbd>L</kbd> Licht · <kbd>H</kbd> Hupe · <kbd>M</kbd> Karte · <kbd>B</kbd> Blick zurück · <kbd>Esc</kbd> Pause</div>
+      <div><kbd>L</kbd> Licht · <kbd>H</kbd> Hupe · <kbd>M</kbd> Karte (Open World: Wegpunkt, Schnellreise) · <kbd>B</kbd> Blick zurück · <kbd>V</kbd> Fotomodus · <kbd>Esc</kbd> Pause</div>
       <div>Gamepad: Stick lenken, RT Gas, LT Bremse, A Handbremse, Y Kamera</div>
     </div>
   </div>
@@ -308,9 +413,19 @@
     <div class="cell" id="pos-block"><span class="k">Pos</span><span class="v" id="pos-value">–</span></div>
     <div class="cell" id="lap-block"><span class="k">Runde</span><span class="v" id="lap-value">1</span></div>
     <div class="cell" id="time-block"><span class="k">Zeit</span><span class="v mono" id="time-value">0:00.000</span><span class="k" style="margin-top:4px">Beste</span><span class="v mono best" id="best-value">–</span></div>
-    <div class="cell" id="drift-block"><span class="k">Drift-Punkte</span><span class="v" id="drift-total">0</span></div>
+    <div class="cell" id="level-block"><span class="k">Stufe</span><span class="v" id="level-value">1</span><span class="xpbar"><i id="xp-fill"></i></span><span class="k xp" id="xp-text">0 / 1.500 XP</span></div>
   </div>
-  <div id="drift-current" hidden></div>
+  <div id="skills" hidden>
+    <div id="skill-feed"></div>
+    <div class="skill-total"><b id="skill-points">0</b><span id="skill-mult">×1</span></div>
+    <div class="skill-timer"><i id="skill-timer"></i></div>
+  </div>
+  <div id="gps" hidden>
+    <svg id="gps-arrow" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 3 L41 40 L24 31 L7 40 Z" fill="#b98cff" stroke="#0b0e12" stroke-width="2.5" stroke-linejoin="round"/></svg>
+    <div><span id="gps-name">Wegpunkt</span><b id="gps-dist"></b></div>
+  </div>
+  <div id="banner" hidden><span id="banner-kind"></span><b id="banner-title"></b><span id="banner-sub"></span></div>
+  <div id="feed" aria-live="polite"></div>
   <canvas id="minimap" aria-label="Minikarte"></canvas>
   <div id="hud-buttons">
     <button class="hud-btn" id="btn-camera" title="Kamera wechseln (C)" aria-label="Kamera wechseln"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
@@ -329,7 +444,41 @@
   <div id="result-toast" hidden></div>
 </div>
 <div id="flash" hidden></div>
-<canvas id="worldmap" hidden aria-label="Weltkarte"></canvas>
+<div id="fade" hidden></div>
+
+<div id="worldmap" hidden>
+  <canvas id="wm-canvas" aria-label="Weltkarte"></canvas>
+  <div class="wm-top">
+    <div class="wm-title"><span class="eyebrow">Karte</span><b id="wm-region">Nordkamm City</b></div>
+    <div class="wm-stats">
+      <div><span class="k">Stufe</span><span class="v" id="wm-level">1</span><span class="xpbar"><i id="wm-xp"></i></span></div>
+      <div><span class="k">Sterne</span><span class="v" id="wm-stars">0</span></div>
+      <div><span class="k">Straßen</span><span class="v" id="wm-roads">0 %</span></div>
+      <div><span class="k">Orte</span><span class="v" id="wm-places">0</span></div>
+      <div><span class="k">Bonus</span><span class="v" id="wm-boards">0</span></div>
+    </div>
+    <button class="wm-close hud-btn" id="wm-close" aria-label="Karte schließen" title="Karte schließen (M)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="wm-filters" id="wm-filters"></div>
+  <div class="wm-zoom">
+    <button class="hud-btn" id="wm-zoom-in" aria-label="Hineinzoomen"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="hud-btn" id="wm-zoom-out" aria-label="Herauszoomen"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <button class="hud-btn" id="wm-center" aria-label="Auf mich zentrieren"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>
+  </div>
+  <aside class="wm-card" id="wm-card" hidden>
+    <button class="wm-card-close" id="wm-card-close" aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="wm-card-kind" id="wm-card-kind"></div>
+    <h3 id="wm-card-title"></h3>
+    <p id="wm-card-blurb"></p>
+    <dl id="wm-card-stats"></dl>
+    <div class="wm-card-actions">
+      <button class="primary" id="wm-route">Route setzen</button>
+      <button class="secondary" id="wm-travel">Schnellreise</button>
+    </div>
+    <p class="muted" id="wm-card-note"></p>
+  </aside>
+  <div class="wm-hints" id="wm-hints"><span>Ziehen: verschieben</span><span>Mausrad: zoomen</span><span>Klick: auswählen</span><span>Rechtsklick: Route löschen</span><span><kbd>M</kbd> schließen</span></div>
+</div>
 
 <div id="touch" hidden>
   <div class="pad" data-steer aria-label="Lenken"><div class="steer-knob"></div></div>
@@ -340,6 +489,27 @@
     <div class="pedal hand" data-hold="handbrake">Hand&shy;bremse</div>
     <div class="pedal gas" data-hold="gas">Gas</div>
     <div class="pedal brake" data-hold="brake">Bremse</div>
+  </div>
+</div>
+
+<div id="photo" hidden>
+  <div id="photo-surface" aria-label="Kamera drehen"></div>
+  <div class="photo-bar">
+    <span class="eyebrow">Fotomodus</span>
+    <label class="photo-fov">Brennweite <input type="range" id="photo-fov" min="20" max="80" step="1" value="45"></label>
+    <button class="primary" id="photo-take">Foto</button>
+    <button class="secondary" id="photo-close">Zurück</button>
+  </div>
+  <div class="photo-hint">Ziehen: Kamera drehen · Mausrad oder zwei Finger: Abstand</div>
+  <div id="photo-shot" class="overlay" hidden>
+    <div class="dialog photo-dialog">
+      <img id="photo-img" alt="Dein Foto">
+      <div class="row">
+        <a class="primary" id="photo-save" href="#" download="nordkamm-foto.jpg">Speichern</a>
+        <button class="secondary" id="photo-shot-close">Weiter fotografieren</button>
+      </div>
+      <p class="muted">Klappt das Speichern nicht, halte das Bild gedrückt oder nutze die rechte Maustaste.</p>
+    </div>
   </div>
 </div>
 
@@ -356,6 +526,9 @@
     <div class="row">
       <button class="secondary" id="sound-btn">Ton: an</button>
       <button class="secondary" id="lights-btn">Licht: aus</button>
+    </div>
+    <div class="row">
+      <button class="secondary" id="photo-btn">Fotomodus</button>
     </div>
     <div class="group">
       <div class="group-label">Grafik</div>

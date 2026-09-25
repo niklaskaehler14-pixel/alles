@@ -1,13 +1,15 @@
 // Procedural world data: terrain heights, track profile, city layout, vegetation and colliders.
 // Pure JavaScript so it can be unit-tested in Node without WebGL.
 
-import { WORLD, ROAD, CITY, LAKE, TRACK_POINTS, START_POINT, SEED } from './config.js';
+import { WORLD, ROAD, CITY, LAKE, MOUNTAIN, FESTIVAL, TRACK_POINTS, START_POINT, SEED } from './config.js';
 import { mulberry32, createNoise2D, fbm, ridged } from './noise.js';
 import { clamp, lerp, smoothstep } from './util.js';
 import { Track } from './track.js';
 import { Heightfield } from './heightfield.js';
 import { StaticColliders } from './collision.js';
 import { planActivities, inClearCorridor, rampSurface } from './activities.js';
+import { buildRoadNetwork, branchAt } from './roads.js';
+import { planLandmarks } from './landmarks.js';
 
 export class WorldData {
   constructor(seed = SEED) {
@@ -21,6 +23,7 @@ export class WorldData {
     this.nMisc = createNoise2D(rng);
     this.rng = mulberry32(seed ^ 0x9e3779b9);
     this.cityHeight = 0;
+    this.festivalHeight = 0;
     this.colliders = new StaticColliders(24);
     this.lakeCentre = { x: LAKE.x, z: LAKE.z };
   }
@@ -57,12 +60,48 @@ export class WorldData {
     return h;
   }
 
+  // Kaminari range in the middle of the map: a ridge with two summits and a pass. The flanks at the
+  // pass are smooth so the touge switchbacks lie cleanly in the slope; elsewhere the rock is rugged.
+  // Compact support keeps the circuit and the city untouched.
+  mountainHeight(x, z) {
+    const M = MOUNTAIN;
+    const rx = x - M.a[0];
+    const rz = z - M.a[1];
+    const s = (rx * M.dir[0] + rz * M.dir[1]) / M.length;
+    const sc = clamp(s, 0, 1);
+    const d = Math.hypot(x - (M.a[0] + M.dir[0] * sc * M.length), z - (M.a[1] + M.dir[1] * sc * M.length));
+    if (d >= M.halfWidth) return 0;
+    // Ridge body with a level crest (the pass), smooth flanks.
+    const u = d / M.halfWidth;
+    let m = M.passHeight * (1 - u * u * u * (u * (u * 6 - 15) + 10));
+    // Summits: cones joined with a soft union. They fade out around the pass so its flanks stay
+    // planar there and the touge switchbacks lie cleanly in the slope.
+    const quiet = smoothstep(0.34, 0.2, Math.abs(s - M.pass));
+    for (const p of M.peaks) {
+      const px = M.a[0] + M.dir[0] * p.s * M.length;
+      const pz = M.a[1] + M.dir[1] * p.s * M.length;
+      const v2 = ((x - px) ** 2 + (z - pz) ** 2) / (p.r * p.r);
+      if (v2 >= 1) continue;
+      const c = p.h * (1 - v2) * (1 - v2) * (1 - quiet);
+      m = m + c - (m * c) / p.h;
+    }
+    const rough = 0.88 + 0.24 * ridged(this.nRidge, x * 0.0021 + 7.1, z * 0.0021 - 3.3, 3);
+    return m * (rough + (1 - rough) * quiet);
+  }
+
+  festivalMask(x, z) {
+    const d = Math.hypot(x - FESTIVAL.x, z - FESTIVAL.z);
+    return smoothstep(FESTIVAL.radius + 120, FESTIVAL.radius, d);
+  }
+
   naturalHeight(x, z) {
-    let h = this.#rawHeight(x, z);
+    let h = this.#rawHeight(x, z) + this.mountainHeight(x, z);
     const lk = this.lakeMask(x, z);
     if (lk > 0) h = lerp(h, LAKE.depth, lk);
     const ck = this.cityMask(x, z);
     if (ck > 0) h = lerp(h, this.cityHeight, ck);
+    const fk = this.festivalMask(x, z);
+    if (fk > 0) h = lerp(h, this.festivalHeight, fk);
     return h;
   }
 
@@ -75,6 +114,12 @@ export class WorldData {
     }
     this.cityHeight = Math.round(sum / 32);
     CITY.height = this.cityHeight;
+    let fsum = 0;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      fsum += this.#rawHeight(FESTIVAL.x + Math.cos(a) * FESTIVAL.radius, FESTIVAL.z + Math.sin(a) * FESTIVAL.radius);
+    }
+    this.festivalHeight = Math.round(fsum / 16);
 
     const track = new Track(TRACK_POINTS, ROAD.spacing);
     this.track = track;
@@ -165,63 +210,180 @@ export class WorldData {
     return track;
   }
 
+  // Branch roads of the open world (touge, lake road, gravel road).
+  buildRoads() {
+    return buildRoadNetwork(this);
+  }
+
   buildTerrain() {
     const hf = new Heightfield(WORLD.size, WORLD.segments);
     this.heightfield = hf;
-    const track = this.track;
     const stride = hf.stride;
-    this.roadDist = new Float32Array(stride * stride);
-    const q = { index: 0 };
+    const cell = hf.cell;
+    const N = stride * stride;
+    // Every road sample stamps its neighbourhood. Each vertex keeps the nearest candidate and the
+    // nearest one from a different road or a different leg of the same road (switchbacks), so the
+    // slope between two stacked legs is interpolated instead of snapping to one of them.
+    const d1 = new Float32Array(N).fill(1e9);
+    const h1 = new Float32Array(N);
+    const w1 = new Float32Array(N); // half width (road edge incl. shoulder) of that road
+    const r1 = new Int16Array(N).fill(-1);
+    const i1 = new Int32Array(N);
+    const d2 = new Float32Array(N).fill(1e9);
+    const h2 = new Float32Array(N);
+    const w2 = new Float32Array(N);
+    const r2 = new Int16Array(N).fill(-1);
+    const roads = [this.track, ...(this.branches || [])];
+    const maxBlend = 110;
+    roads.forEach((road, ri) => {
+      const ht = road === this.track ? ROAD.halfTotal : road.halfTotal;
+      const reach = ht + 6 + maxBlend;
+      const n = road.count;
+      const legGap = (i, j) => {
+        let k = Math.abs(i - j);
+        if (road.closed) k = Math.min(k, n - k);
+        return k * road.spacing;
+      };
+      for (let i = 0; i < n; i++) {
+        const x = road.x[i];
+        const z = road.z[i];
+        const hr = road.h[i];
+        const ix0 = Math.max(0, Math.floor((x - reach + WORLD.half) / cell));
+        const ix1 = Math.min(stride - 1, Math.ceil((x + reach + WORLD.half) / cell));
+        const iz0 = Math.max(0, Math.floor((z - reach + WORLD.half) / cell));
+        const iz1 = Math.min(stride - 1, Math.ceil((z + reach + WORLD.half) / cell));
+        for (let iz = iz0; iz <= iz1; iz++) {
+          const dz = hf.worldZ(iz) - z;
+          for (let ix = ix0; ix <= ix1; ix++) {
+            const dx = hf.worldX(ix) - x;
+            const d = Math.sqrt(dx * dx + dz * dz);
+            if (d > reach) continue;
+            const v = ix + iz * stride;
+            const e = d - ht; // distance beyond the road edge
+            if (e < d1[v]) {
+              const sameLeg = r1[v] === ri && legGap(i, i1[v]) < (e + d1[v] + 2 * ht) * 1.6 + 20;
+              if (!sameLeg) {
+                d2[v] = d1[v];
+                h2[v] = h1[v];
+                w2[v] = w1[v];
+                r2[v] = r1[v];
+              }
+              d1[v] = e;
+              h1[v] = hr;
+              w1[v] = ht;
+              r1[v] = ri;
+              i1[v] = i;
+            } else if (e < d2[v]) {
+              const sameLeg = r1[v] === ri && legGap(i, i1[v]) < (e + d1[v] + 2 * ht) * 1.6 + 20;
+              if (!sameLeg) {
+                d2[v] = e;
+                h2[v] = hr;
+                w2[v] = ht;
+                r2[v] = ri;
+              }
+            }
+          }
+        }
+      }
+    });
+    // Terrain shaped by one road: cut to sit under the ribbon, level shoulders, then blend out.
+    const shape = (e, hr, nat) => {
+      if (e < 0.6) return hr - 0.4;
+      if (e < 6) return hr - 0.1;
+      const blend = clamp(Math.abs(nat - hr) * 2.4, 22, maxBlend);
+      if (e < 6 + blend) return lerp(hr - 0.1, nat, smoothstep(6, 6 + blend, e));
+      return nat;
+    };
+    this.roadDist = new Float32Array(N);
     for (let iz = 0; iz < stride; iz++) {
       const z = hf.worldZ(iz);
       for (let ix = 0; ix < stride; ix++) {
         const x = hf.worldX(ix);
-        let h = this.naturalHeight(x, z);
-        let dist = 999;
-        const near = track.nearest(x, z, -1, q, 3);
-        if (near.index >= 0) {
-          dist = near.dist;
-          const hr = near.height;
-          const core = ROAD.halfTotal + 0.6;
-          const flat = ROAD.halfTotal + 6;
-          const blend = clamp(Math.abs(h - hr) * 2.4, 22, 110);
-          if (dist < core) h = hr - 0.4;
-          else if (dist < flat) h = hr - 0.1;
-          else if (dist < flat + blend) h = lerp(hr - 0.1, h, smoothstep(flat, flat + blend, dist));
+        const v = ix + iz * stride;
+        const nat = this.naturalHeight(x, z);
+        let h = nat;
+        if (r1[v] >= 0) {
+          h = shape(d1[v], h1[v], nat);
+          if (r2[v] >= 0 && d1[v] > 6) {
+            // Between two roads (or two legs): inverse-distance blend of both shapes.
+            const hB = shape(d2[v], h2[v], nat);
+            const a = 1 / Math.max(0.5, d1[v] - 6) ** 2;
+            const b = 1 / Math.max(0.5, d2[v] - 6) ** 2;
+            h = (h * a + hB * b) / (a + b);
+          }
         }
-        const idx = ix + iz * stride;
-        hf.heights[idx] = h;
-        this.roadDist[idx] = dist;
+        hf.heights[v] = h;
+        // Distance from the centre of a standard-width road with the same edge distance (terrain tint).
+        this.roadDist[v] = r1[v] >= 0 ? d1[v] + ROAD.halfTotal : 999;
       }
     }
     return hf;
   }
 
-  // Ground under a point: road ribbon where present, terrain elsewhere.
+  // Ground under a point: road ribbon where present (circuit or branch), terrain elsewhere.
   groundHeight(x, z, q) {
+    let h = -Infinity;
     if (q && q.index >= 0 && Math.abs(q.lateral) < ROAD.halfTotal) {
       const l = Math.abs(q.lateral);
-      return q.height - (l > ROAD.half ? ((l - ROAD.half) / ROAD.shoulder) * 0.12 : 0);
+      h = q.height - (l > ROAD.half ? ((l - ROAD.half) / ROAD.shoulder) * 0.12 : 0);
     }
-    const h = this.heightfield.get(x, z);
+    const b = this.branchAt(x, z);
+    if (b && b.height > h) h = b.height;
+    if (h > -Infinity) return h;
+    const t = this.heightfield.get(x, z);
     const ramp = rampSurface(this, x, z);
-    return ramp > 0 ? h + ramp : h;
+    return ramp > 0 ? t + ramp : t;
+  }
+
+  // Branch road under (x, z) or null. The last lookup is cached (ground and surface ask in turn).
+  branchAt(x, z) {
+    const c = this._branchCache || (this._branchCache = { x: NaN, z: NaN, hit: null, out: {}, q: {} });
+    if (c.x === x && c.z === z) return c.hit;
+    c.x = x;
+    c.z = z;
+    c.hit = branchAt(this, x, z, c.out, c.q);
+    return c.hit;
   }
 
   planActivities() {
     return planActivities(this);
   }
 
+  // Festival grounds, torii, lighthouse, cherry trees, neon signs, bonus boards and landmarks.
+  planLandmarks() {
+    return planLandmarks(this);
+  }
+
   surfaceAt(x, z, h, q) {
     if (q && q.index >= 0) {
       const l = Math.abs(q.lateral);
       if (l < ROAD.half) return 0; // asphalt
-      if (l < ROAD.halfTotal) return 2; // gravel shoulder
+      if (l < ROAD.halfTotal) {
+        const b = this.branchAt(x, z);
+        if (b && Math.abs(b.lateral) < b.road.half) return b.road.surface;
+        return 2; // gravel shoulder
+      }
     }
+    const b = this.branchAt(x, z);
+    if (b) return Math.abs(b.lateral) < b.road.half ? b.road.surface : 2;
     if (Math.hypot(x - CITY.x, z - CITY.z) < CITY.radius - 8) return 0;
+    if (Math.hypot(x - FESTIVAL.x, z - FESTIVAL.z) < FESTIVAL.radius - 4) return 0; // festival plaza
     if (rampSurface(this, x, z) > 0) return 0; // ramp deck grips like asphalt
     if (h < WORLD.waterLevel + 2.2) return 3; // sand / shallow water
     return 1; // grass
+  }
+
+  // Distance from (x, z) to the nearest branch road centre line (Infinity when far away).
+  branchDistance(x, z, margin = 0) {
+    let best = Infinity;
+    const q = this._bdq || (this._bdq = {});
+    for (const road of this.branches || []) {
+      const b = road.bbox;
+      if (x < b.minX - margin || x > b.maxX + margin || z < b.minZ - margin || z > b.maxZ + margin) continue;
+      const r = road.nearest(x, z, -1, q, 2);
+      if (r.index >= 0) best = Math.min(best, r.dist - road.halfTotal);
+    }
+    return best;
   }
 
   // ---------------------------------------------------------------- objects
@@ -268,6 +430,64 @@ export class WorldData {
     this.parks = parks;
   }
 
+  // Guard rails along the touge: on the outside of hairpins and wherever the slope falls away.
+  placeGuardRails() {
+    const rails = [];
+    for (const road of this.branches || []) {
+      if (road.type !== 'touge') continue;
+      const n = road.count;
+      const flags = [new Uint8Array(n), new Uint8Array(n)]; // left, right
+      const pt = {};
+      for (let i = 0; i < n; i++) {
+        const s = i * road.spacing;
+        for (const [k, sd] of [
+          [0, 1],
+          [1, -1],
+        ]) {
+          road.pointAt(s, sd * (road.halfTotal + 16), pt);
+          const drop = road.h[i] - this.naturalHeight(pt.x, pt.z);
+          const outer = road.curv[i] * sd < -1 / 45; // turning away from this side
+          if (drop > 3.5 || outer) flags[k][i] = 1;
+        }
+      }
+      for (const [k, sd] of [
+        [0, 1],
+        [1, -1],
+      ]) {
+        // Close small gaps, then keep runs of at least 30 m away from the road ends and junctions.
+        const f = flags[k];
+        const grown = new Uint8Array(n);
+        for (let i = 0; i < n; i++) if (f[i]) for (let d = -8; d <= 8; d++) if (i + d >= 0 && i + d < n) grown[i + d] = 1;
+        const keepOut = (i) => {
+          const s = i * road.spacing;
+          if (s < 40 || s > road.length - 40) return true;
+          return road.junctions.some((j) => Math.abs(s - j.s) < 40);
+        };
+        let i = 0;
+        while (i < n) {
+          if (!grown[i] || keepOut(i)) {
+            i++;
+            continue;
+          }
+          let j = i;
+          while (j < n && grown[j] && !keepOut(j)) j++;
+          if ((j - i) * road.spacing >= 30) rails.push({ road, side: sd, s0: i * road.spacing, s1: (j - 1) * road.spacing });
+          i = j;
+        }
+      }
+    }
+    const pt = {};
+    for (const r of rails) {
+      const lat = r.side * (r.road.halfTotal - 0.25);
+      for (let s = r.s0; s <= r.s1; s += 1.5) {
+        r.road.pointAt(s, lat, pt);
+        this.colliders.addCircle(pt.x, pt.z, 0.3, 'rail');
+      }
+    }
+    this.rails = rails;
+    return rails;
+  }
+
   placeLamps() {
     const track = this.track;
     const lamps = [];
@@ -287,6 +507,16 @@ export class WorldData {
       }
       side = -side;
       s += inCity ? 32 : 58;
+    }
+    // The lake road is lit on its lake side.
+    for (const road of this.branches || []) {
+      if (road.type !== 'lake') continue;
+      for (let s = 30; s < road.length - 30; s += 62) {
+        const p = road.pointAt(s, -(road.halfTotal + 1.4), {});
+        if (this.track.nearest(p.x, p.z, -1, {}).dist < ROAD.halfTotal + 6) continue;
+        lamps.push({ x: p.x, z: p.z, y: this.heightfield.get(p.x, p.z), yaw: p.heading + Math.PI / 2, road: road.id });
+        this.colliders.addCircle(p.x, p.z, 0.25, 'pole');
+      }
     }
     this.lamps = lamps;
   }
@@ -315,6 +545,9 @@ export class WorldData {
       if (inClearCorridor(this, x, z)) continue;
       const near = this.track.nearest(x, z, -1, q);
       if (near.index >= 0 && near.dist < ROAD.halfTotal + 9) continue;
+      if (this.branchDistance(x, z, 10) < 8) continue;
+      if (Math.hypot(x - FESTIVAL.x, z - FESTIVAL.z) < FESTIVAL.radius + 30) continue;
+      if (this.#nearScenery(x, z)) continue;
       const pine = h > 75 || forest + this.nMisc(x * 0.01, z * 0.01) * 0.3 > 0.25;
       const scale = 0.75 + rng() * 0.6;
       trees.push({ x, z, y: h - 0.2, s: scale, type: pine ? 0 : 1, rot: rng() * Math.PI * 2, tint: rng() });
@@ -326,7 +559,9 @@ export class WorldData {
         trees.push({ x, z, y: this.cityHeight - 0.1, s: 0.8 + rng() * 0.3, type: 1, rot: rng() * 6.28, tint: rng() });
       }
     }
-    // Sort into a stable order and register trunks as colliders.
+    // Cherry trees (type 2) from the scenery plan: the lake road avenue and around the festival.
+    for (const c of this.sakura || []) trees.push({ x: c.x, z: c.z, y: c.y, s: c.s, type: 2, rot: rng() * Math.PI * 2, tint: rng() });
+    // Register trunks as colliders.
     for (const tr of trees) this.colliders.addCircle(tr.x, tr.z, 0.45 * tr.s + 0.1, 'tree');
     this.trees = trees;
 
@@ -342,11 +577,25 @@ export class WorldData {
       if (inClearCorridor(this, x, z, 4)) continue;
       const near = this.track.nearest(x, z, -1, q);
       if (near.index >= 0 && near.dist < ROAD.halfTotal + 7) continue;
+      if (this.branchDistance(x, z, 10) < 6) continue;
+      if (Math.hypot(x - FESTIVAL.x, z - FESTIVAL.z) < FESTIVAL.radius + 30) continue;
+      if (this.#nearScenery(x, z)) continue;
       const s = 0.6 + rng() * rng() * 3.2;
       rocks.push({ x, z, y: h - s * 0.25, s, rot: rng() * 6.28, tilt: rng() });
       if (s > 0.9) this.colliders.addCircle(x, z, s * 0.75, 'rock');
     }
     this.rocks = rocks;
+  }
+
+  // Keeps trees and rocks off the landmarks, the bonus boards and the Ferris wheel.
+  #nearScenery(x, z) {
+    const lh = this.lighthouse;
+    if (lh && Math.hypot(x - lh.x, z - lh.z) < 14) return true;
+    const w = this.festival?.wheel;
+    if (w && Math.hypot(x - w.x, z - w.z) < 34) return true;
+    for (const b of this.bonusBoards || []) if (Math.abs(x - b.x) < 8 && Math.abs(z - b.z) < 8) return true;
+    for (const l of this.lanterns || []) if (Math.abs(x - l.x) < 4 && Math.abs(z - l.z) < 4) return true;
+    return false;
   }
 
   placeBillboards() {
@@ -370,10 +619,13 @@ export class WorldData {
 
   generateAll() {
     this.buildTrack();
+    this.buildRoads();
     this.buildTerrain();
+    this.placeGuardRails();
     this.placeCity();
     this.placeLamps();
     this.planActivities();
+    this.planLandmarks();
     this.placeVegetation();
     this.placeBillboards();
     return this;

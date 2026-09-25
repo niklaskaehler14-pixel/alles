@@ -24,6 +24,7 @@ const TAP_KEYS = {
   KeyQ: 'shiftDown',
   KeyL: 'lights',
   KeyM: 'map',
+  KeyV: 'photo',
 };
 
 export class Input {
@@ -190,6 +191,7 @@ export class Input {
   }
 
   #pollGamepad() {
+    this.pad = null;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const p of pads) {
       if (!p || !p.connected) continue;
@@ -197,7 +199,10 @@ export class Input {
       const axis = p.axes[0] || 0;
       const steer = Math.abs(axis) < 0.12 ? 0 : (axis - Math.sign(axis) * 0.12) / 0.88;
       const pad = { steer, throttle: btn(7), brake: btn(6), handbrake: btn(0) > 0.5 || btn(2) > 0.5 };
-      const edges = { 3: 'camera', 9: 'pause', 1: 'reset', 5: 'shiftUp', 4: 'shiftDown', 8: 'map', 12: 'lights' };
+      // Map navigation: left stick pans, triggers zoom; A confirms, X fast-travels (only read by the map).
+      const dead = (a) => (Math.abs(a || 0) < 0.15 ? 0 : a);
+      this.pad = { x: dead(p.axes[0]), y: dead(p.axes[1]), zoomIn: btn(7), zoomOut: btn(6) };
+      const edges = { 3: 'camera', 9: 'pause', 1: 'reset', 5: 'shiftUp', 4: 'shiftDown', 8: 'map', 12: 'lights', 0: 'confirm', 2: 'travel' };
       for (const [i, action] of Object.entries(edges)) {
         const now = btn(Number(i)) > 0.5;
         if (now && !this.prevPad[i]) this.taps.add(action);

@@ -6,6 +6,8 @@ import { WORLD, ROAD, CITY } from './config.js';
 import { mulberry32, createNoise2D } from './noise.js';
 import { clamp, lerp, smoothstep } from './util.js';
 import * as TX from './textures.js';
+import { branchSurface } from './roads.js';
+import { Scenery } from './scenery.js';
 
 export const TIME_PRESETS = {
   day: {
@@ -321,6 +323,143 @@ export class WorldView {
 
     this.#buildCurbs();
     this.#buildStart();
+    this.#buildBranches();
+    this.#buildGuardRails();
+  }
+
+  // Branch roads: same ribbon construction as the circuit, heights from the shared surface function
+  // so junctions meet the circuit without a step. Drawn below the circuit where they overlap.
+  #buildBranches() {
+    const d = this.data;
+    const textures = {
+      touge: TX.roadTexture(this.aniso, { width: 10, shoulder: 1.3, centre: 'double', seed: 13, tracks: [2.3, 3.8, 8.8, 10.3] }),
+      lake: TX.roadTexture(this.aniso, { width: 11.5, shoulder: 1.5, seed: 17, tracks: [3.1, 4.6, 9.9, 11.4] }),
+      gravel: TX.gravelRoadTexture(this.aniso),
+    };
+    this.branchMeshes = [];
+    for (const road of d.branches || []) {
+      const n = road.count;
+      const ht = road.halfTotal;
+      const cols = [-ht, -road.half, -road.half * 0.5, 0, road.half * 0.5, road.half, ht];
+      const nc = cols.length;
+      const pos = new Float32Array(n * nc * 3);
+      const uv = new Float32Array(n * nc * 2);
+      const q = { s: 0, lateral: 0, height: 0 };
+      for (let i = 0; i < n; i++) {
+        const s = i * road.spacing;
+        const lx = road.tz[i];
+        const lz = -road.tx[i];
+        q.s = s;
+        q.height = road.h[i];
+        for (let c = 0; c < nc; c++) {
+          const k = i * nc + c;
+          const x = road.x[i] + lx * cols[c];
+          const z = road.z[i] + lz * cols[c];
+          q.lateral = cols[c];
+          pos[k * 3] = x;
+          pos[k * 3 + 1] = branchSurface(road, x, z, q) + 0.04;
+          pos[k * 3 + 2] = z;
+          uv[k * 2] = (cols[c] + ht) / (2 * ht);
+          uv[k * 2 + 1] = s / (road.type === 'gravel' ? 16 : 20);
+        }
+      }
+      const index = [];
+      for (let i = 0; i < n - 1; i++) {
+        for (let c = 0; c < nc - 1; c++) {
+          const a = i * nc + c;
+          const b = a + 1;
+          const cc = a + nc;
+          const dd = cc + 1;
+          index.push(a, cc, b, b, cc, dd);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      geo.setIndex(index);
+      geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      const mat = new THREE.MeshStandardMaterial({
+        map: textures[road.type] || textures.lake,
+        roughness: road.type === 'gravel' ? 0.97 : 0.86,
+        metalness: 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.receiveShadow = true;
+      mesh.name = `road-${road.id}`;
+      this.root.add(mesh);
+      this.branchMeshes.push(mesh);
+    }
+  }
+
+  #buildGuardRails() {
+    const rails = this.data.rails || [];
+    if (!rails.length) return;
+    const beam = { pos: [], uv: [], nor: [] };
+    const posts = [];
+    const postGeo = new THREE.BoxGeometry(0.14, 0.95, 0.14).toNonIndexed();
+    postGeo.deleteAttribute('uv');
+    const pt = {};
+    const q = { s: 0, lateral: 0, height: 0 };
+    const surf = (road, s, lat) => {
+      road.pointAt(s, lat, pt);
+      q.s = s;
+      q.lateral = lat;
+      q.height = pt.h;
+      return { x: pt.x, z: pt.z, y: branchSurface(road, pt.x, pt.z, q), tx: pt.tx, tz: pt.tz };
+    };
+    const m4 = new THREE.Matrix4();
+    for (const r of rails) {
+      const lat = r.side * (r.road.halfTotal - 0.25);
+      const steps = Math.max(1, Math.round((r.s1 - r.s0) / 2));
+      let prev = null;
+      for (let k = 0; k <= steps; k++) {
+        const s = r.s0 + ((r.s1 - r.s0) * k) / steps;
+        const p = surf(r.road, s, lat);
+        // Beam faces the road: normal points towards the centre line.
+        const nx = -r.side * p.tz;
+        const nz = r.side * p.tx;
+        p.s = s;
+        if (prev) {
+          const quad = [
+            [prev.x, prev.y + 0.52, prev.z, prev.s, 0],
+            [p.x, p.y + 0.52, p.z, s, 0],
+            [p.x, p.y + 0.86, p.z, s, 1],
+            [prev.x, prev.y + 0.86, prev.z, prev.s, 1],
+          ];
+          for (const idx of [0, 1, 2, 0, 2, 3]) {
+            const v = quad[idx];
+            beam.pos.push(v[0], v[1], v[2]);
+            beam.uv.push(v[3] / 4, v[4]);
+            beam.nor.push(nx, 0, nz);
+          }
+        }
+        if (k % 2 === 0) {
+          const g = postGeo.clone();
+          m4.makeRotationY(Math.atan2(p.tx, p.tz));
+          m4.setPosition(p.x - nx * 0.12, p.y + 0.45, p.z - nz * 0.12);
+          posts.push(g.applyMatrix4(m4));
+        }
+        prev = p;
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(beam.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(beam.nor, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(beam.uv, 2));
+    geo.computeBoundingSphere();
+    const tex = TX.guardRailTexture();
+    const mat = new THREE.MeshStandardMaterial({ map: tex, metalness: 0.55, roughness: 0.38, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = this.quality.shadows > 0;
+    mesh.receiveShadow = true;
+    this.root.add(mesh);
+    const postMesh = new THREE.Mesh(mergeGeometries(posts), new THREE.MeshStandardMaterial({ color: '#8a9096', metalness: 0.5, roughness: 0.45 }));
+    postMesh.castShadow = this.quality.shadows > 0;
+    this.root.add(postMesh);
   }
 
   #buildCurbs() {
@@ -607,11 +746,11 @@ export class WorldView {
     return mergeGeometries(parts.map((g) => g.toNonIndexed()));
   }
 
-  #broadleafGeometry(rng) {
+  #broadleafGeometry(rng, leaf = '#4f7031', bark = '#5e4630') {
     const parts = [];
     const trunk = new THREE.CylinderGeometry(0.16, 0.3, 4, 6);
     trunk.translate(0, 2, 0);
-    parts.push(colorizeGeometry(trunk, '#5e4630', 0.08, rng));
+    parts.push(colorizeGeometry(trunk, bark, 0.08, rng));
     const blobs = [
       [0, 5.6, 0, 2.6],
       [1.3, 4.9, 0.6, 1.9],
@@ -634,7 +773,7 @@ export class WorldView {
         nrm.setXYZ(i, x / l, y / l, z / l);
       }
       g.translate(bx, by, bz);
-      parts.push(colorizeGeometry(g, '#4f7031', 0.14, rng));
+      parts.push(colorizeGeometry(g, leaf, 0.14, rng));
     }
     return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
   }
@@ -654,10 +793,10 @@ export class WorldView {
     return mergeGeometries(parts.map((g) => g.toNonIndexed()));
   }
 
-  #broadleafLowGeometry(rng) {
+  #broadleafLowGeometry(rng, leaf = '#4f7031', bark = '#5e4630') {
     const trunk = new THREE.CylinderGeometry(0.18, 0.3, 4, 5, 1, true);
     trunk.translate(0, 2, 0);
-    const parts = [colorizeGeometry(trunk, '#5e4630', 0.05, rng)];
+    const parts = [colorizeGeometry(trunk, bark, 0.05, rng)];
     for (const [bx, by, bz, r] of [
       [0, 5.5, 0, 2.9],
       [0.3, 6.9, -0.3, 2.0],
@@ -665,7 +804,7 @@ export class WorldView {
       const g = new THREE.IcosahedronGeometry(r, 0);
       g.scale(1, 0.85, 1);
       g.translate(bx, by, bz);
-      parts.push(colorizeGeometry(g, '#4f7031', 0.1, rng));
+      parts.push(colorizeGeometry(g, leaf, 0.1, rng));
     }
     return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
   }
@@ -673,8 +812,9 @@ export class WorldView {
   buildVegetation() {
     const d = this.data;
     const rng = mulberry32(99);
-    const geos = [this.#pineGeometry(rng), this.#broadleafGeometry(rng)];
-    const lowGeos = [this.#pineLowGeometry(rng), this.#broadleafLowGeometry(rng)];
+    // Types: 0 pine, 1 broadleaf, 2 cherry tree in blossom.
+    const geos = [this.#pineGeometry(rng), this.#broadleafGeometry(rng), this.#broadleafGeometry(rng, '#f3b3cb', '#4a3328')];
+    const lowGeos = [this.#pineLowGeometry(rng), this.#broadleafLowGeometry(rng), this.#broadleafLowGeometry(rng, '#f3b3cb', '#4a3328')];
     const mats = geos.map(() => {
       const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
       addSway(m, this.uniforms, 0.035);
@@ -684,7 +824,8 @@ export class WorldView {
     const buckets = new Map();
     const keep = this.quality.trees;
     d.trees.forEach((t, i) => {
-      if (((i * 2654435761) % 1000) / 1000 >= keep) return;
+      // Cherry trees are part of the scenery and always shown.
+      if (t.type !== 2 && ((i * 2654435761) % 1000) / 1000 >= keep) return;
       const key = `${t.type}:${Math.floor((t.x + 2000) / chunkSize)}:${Math.floor((t.z + 2000) / chunkSize)}`;
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key).push(t);
@@ -698,6 +839,7 @@ export class WorldView {
     const tints = [
       [new THREE.Color('#d6e3c4'), new THREE.Color('#ffffff'), new THREE.Color('#c2cfa3')],
       [new THREE.Color('#e8f0c8'), new THREE.Color('#ffffff'), new THREE.Color('#f0d9a0')],
+      [new THREE.Color('#ffe4ee'), new THREE.Color('#ffffff'), new THREE.Color('#ffc2da')],
     ];
     const shadows = this.quality.shadows > 0;
     for (const [key, list] of buckets) {
@@ -743,7 +885,7 @@ export class WorldView {
       const k = 1 + noise(x * 1.7, z * 1.7 + y) * 0.28;
       rp.setXYZ(i, x * k * 1.2, y * k * 0.75, z * k);
     }
-    const rockFlat = rockGeo.toNonIndexed();
+    const rockFlat = rockGeo.index ? rockGeo.toNonIndexed() : rockGeo;
     rockFlat.computeVertexNormals();
     const rockMat = new THREE.MeshStandardMaterial({ color: '#8a847b', roughness: 0.95, flatShading: true });
     const rocks = new THREE.InstancedMesh(rockFlat, rockMat, d.rocks.length);
@@ -1032,6 +1174,7 @@ export class WorldView {
     for (const m of this.billboardFaces || []) m.emissiveIntensity = p.night * 0.6;
     this.starMaterial.opacity = p.night > 0.9 ? 0.9 : 0;
     this.backdrop.material.color.set(p.night ? '#6b7a99' : '#ffffff');
+    this.scenery?.setNight(p.night);
   }
 
   setShadowFocus(target) {
@@ -1047,6 +1190,7 @@ export class WorldView {
 
   update(dt, camera) {
     this.uniforms.uTime.value += dt;
+    this.scenery?.update(dt);
     this.sky.position.copy(camera.position);
     this.stars.position.copy(camera.position);
     if (this.sky.material.uniforms.time) this.sky.material.uniforms.time.value += dt;
@@ -1059,6 +1203,12 @@ export class WorldView {
     }
   }
 
+  // Festival, torii, lanterns, lighthouse, neon signs and the volcano.
+  buildScenery() {
+    this.scenery = new Scenery({ scene: this.scene, data: this.data, quality: this.quality, uniforms: this.uniforms });
+    this.scenery.build();
+  }
+
   buildAll() {
     this.buildSky();
     this.buildTerrain();
@@ -1068,6 +1218,7 @@ export class WorldView {
     this.buildLamps();
     this.buildWater();
     this.buildBackdrop();
+    this.buildScenery();
     this.setTimeOfDay('day');
   }
 }

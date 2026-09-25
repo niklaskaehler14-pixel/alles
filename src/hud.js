@@ -1,6 +1,7 @@
 // Head-up display: tachometer, minimap, race panel and messages.
-import { WORLD, CITY, ROAD } from './config.js';
-import { clamp, formatTime, smoothstep } from './util.js';
+import { WORLD, ROAD } from './config.js';
+import { clamp, formatTime, lerp } from './util.js';
+import { drawRoads, drawRoute, drawIcon, drawPlayer, drawPin } from './maprender.js';
 
 const AMBER = '#f2a541';
 const ICE = '#e6eef3';
@@ -92,31 +93,8 @@ function arc(ctx, cx, cy, r, rpm, redline, limiter, width) {
   }
 }
 
-// Round activity marker with an upright glyph; optional stars underneath.
-function drawMarker(ctx, x, y, m, size, withStars = false) {
-  const r = size / 2;
-  ctx.fillStyle = '#0b0e12';
-  ctx.beginPath();
-  ctx.arc(x, y, r + 2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = m.color;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#0b0e12';
-  ctx.font = `800 ${size * 0.62}px "Barlow", sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(m.glyph, x, y + size * 0.03);
-  if (withStars && m.stars !== undefined) {
-    ctx.font = `700 ${size * 0.6}px "Barlow", sans-serif`;
-    ctx.fillStyle = '#ffd24a';
-    ctx.fillText('★'.repeat(m.stars) + '☆'.repeat(3 - m.stars), x, y + size * 0.95);
-  }
-}
-
 export class Hud {
-  constructor(root, world) {
+  constructor(root, world, { raster, lines }) {
     this.root = root;
     this.el = (id) => root.querySelector(`#${id}`);
     this.gauge = this.el('gauge');
@@ -125,8 +103,10 @@ export class Hud {
     this.mctx = this.mini.getContext('2d');
     this.world = world;
     this.msgTimer = 0;
-    this.mapImage = this.#renderMap();
+    this.raster = raster;
+    this.lines = lines;
     this.bigMap = false;
+    this.miniView = 460;
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -141,246 +121,83 @@ export class Hud {
     }
   }
 
-  // Top-down map image of the whole world (rendered once).
-  #renderMap() {
-    const S = 512;
-    const c = document.createElement('canvas');
-    c.width = c.height = S;
-    const ctx = c.getContext('2d');
-    const img = ctx.createImageData(S, S);
-    const hf = this.world.heightfield;
-    const half = WORLD.half;
-    for (let py = 0; py < S; py++) {
-      for (let px = 0; px < S; px++) {
-        const x = -half + ((px + 0.5) / S) * WORLD.size;
-        const z = -half + ((py + 0.5) / S) * WORLD.size;
-        const h = hf.get(x, z);
-        const ex = hf.get(x + 8, z) - h;
-        const shade = clamp(1 - ex * 0.08, 0.7, 1.25);
-        let r;
-        let g;
-        let b;
-        if (h < WORLD.waterLevel) {
-          const d = clamp(-h / 20, 0, 1);
-          r = 40 - d * 16;
-          g = 92 - d * 30;
-          b = 118 - d * 20;
-        } else {
-          const t = smoothstep(0, 320, h);
-          r = 78 + t * 70;
-          g = 102 + t * 40;
-          b = 60 + t * 60;
-          if (h > 390) r = g = b = 225;
-          r *= shade;
-          g *= shade;
-          b *= shade;
-        }
-        if (Math.hypot(x - CITY.x, z - CITY.z) < CITY.radius) {
-          r = 118;
-          g = 118;
-          b = 122;
-        }
-        const i = (py * S + px) * 4;
-        img.data[i] = r;
-        img.data[i + 1] = g;
-        img.data[i + 2] = b;
-        img.data[i + 3] = 255;
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-    // Buildings
-    ctx.fillStyle = '#5b5d63';
-    const toPx = (v) => ((v + half) / WORLD.size) * S;
-    for (const b of this.world.buildings) ctx.fillRect(toPx(b.x - b.w / 2), toPx(b.z - b.d / 2), (b.w / WORLD.size) * S, (b.d / WORLD.size) * S);
-    // Road
-    const tr = this.world.track;
-    const path = () => {
-      ctx.beginPath();
-      for (let i = 0; i <= tr.count; i += 4) {
-        const k = i % tr.count;
-        const x = toPx(tr.x[k]);
-        const y = toPx(tr.z[k]);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-    };
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(10,12,16,0.85)';
-    ctx.lineWidth = 7;
-    path();
-    ctx.stroke();
-    ctx.strokeStyle = '#e8e4da';
-    ctx.lineWidth = 3.4;
-    path();
-    ctx.stroke();
-    // Dirt trails of the off-road runs
-    ctx.setLineDash([5, 4]);
-    ctx.strokeStyle = '#c9b48a';
-    ctx.lineWidth = 2;
-    for (const cor of this.world.clearCorridors || []) {
-      if (!cor.trail) continue;
-      ctx.beginPath();
-      ctx.moveTo(toPx(cor.ax), toPx(cor.az));
-      ctx.lineTo(toPx(cor.bx), toPx(cor.bz));
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    // Start line
-    const sx = toPx(tr.x[tr.startIndex]);
-    const sy = toPx(tr.z[tr.startIndex]);
-    ctx.fillStyle = AMBER;
-    ctx.fillRect(sx - 2, sy - 7, 4, 14);
-    return c;
-  }
-
-  // cars: [{ x, z, yaw, color, player }]
-  drawMinimap(player, cars, markers = []) {
+  // Heading-up minimap: terrain, roads, the GPS route, traffic and activity icons. It zooms out
+  // with speed. cars: [{ x, z, color }], markers: map items, route: GPS points or null.
+  drawMinimap(player, cars, markers = [], route = null, dt = 0.033) {
     const ctx = this.mctx;
     const W = this.mini.width;
     const H = this.mini.height;
+    const want = this.bigMap ? 1600 : lerp(440, 900, clamp(player.speed / 70, 0, 1));
+    this.miniView += (want - this.miniView) * (1 - Math.exp(-dt * 2.5));
+    const ppm = W / this.miniView;
+    const th = Math.PI + player.yaw;
+    const cs = Math.cos(th);
+    const sn = Math.sin(th);
+    const tf = { a: ppm * cs, b: ppm * sn, c: -ppm * sn, d: ppm * cs, e: 0, f: 0 };
+    tf.e = W / 2 - tf.a * player.x - tf.c * player.z;
+    tf.f = H / 2 - tf.b * player.x - tf.d * player.z;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    const S = this.mapImage.width;
-    const scale = S / WORLD.size;
     ctx.save();
     ctx.beginPath();
     ctx.arc(W / 2, H / 2, W / 2 - 2, 0, Math.PI * 2);
     ctx.clip();
     ctx.fillStyle = '#1a2229';
     ctx.fillRect(0, 0, W, H);
-    const viewMeters = this.bigMap ? 1600 : 520;
-    const zoom = W / (viewMeters * scale);
-    ctx.translate(W / 2, H / 2);
-    // Heading up: rotate so that the car's forward points to the top of the map.
-    ctx.rotate(Math.PI + player.yaw);
-    ctx.scale(zoom, zoom);
-    const px = (player.x + WORLD.half) * scale;
-    const pz = (player.z + WORLD.half) * scale;
-    ctx.drawImage(this.mapImage, -px, -pz);
+    // Only the part of the terrain raster around the car is sampled.
+    const r = this.miniView * 0.75;
+    const k = this.raster.width / WORLD.size;
+    const x0 = clamp(player.x - r, -WORLD.half, WORLD.half);
+    const x1 = clamp(player.x + r, -WORLD.half, WORLD.half);
+    const z0 = clamp(player.z - r, -WORLD.half, WORLD.half);
+    const z1 = clamp(player.z + r, -WORLD.half, WORLD.half);
+    ctx.setTransform(tf.a, tf.b, tf.c, tf.d, tf.e, tf.f);
+    ctx.imageSmoothingEnabled = true;
+    if (x1 > x0 && z1 > z0) ctx.drawImage(this.raster, (x0 + WORLD.half) * k, (z0 + WORLD.half) * k, (x1 - x0) * k, (z1 - z0) * k, x0, z0, x1 - x0, z1 - z0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const dpr = W / Math.max(1, this.mini.clientWidth || W);
+    drawRoads(ctx, this.lines, tf, ppm, { simple: true, dpr, bounds: { minX: player.x - r, maxX: player.x + r, minZ: player.z - r, maxZ: player.z + r } });
+    if (route) drawRoute(ctx, route, tf, Math.max(3, W * 0.028));
     for (const c of cars) {
-      if (c.player) continue;
-      const cx = (c.x + WORLD.half) * scale - px;
-      const cz = (c.z + WORLD.half) * scale - pz;
+      const x = tf.a * c.x + tf.c * c.z + tf.e;
+      const y = tf.b * c.x + tf.d * c.z + tf.f;
       ctx.fillStyle = c.color;
       ctx.strokeStyle = '#0b0e12';
-      ctx.lineWidth = 1.5 / zoom;
+      ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath();
-      ctx.arc(cx, cz, 4.2 / zoom, 0, Math.PI * 2);
+      ctx.arc(x, y, 3.6 * dpr, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
     ctx.restore();
-    // Activity markers in screen space (upright glyphs), pinned to the rim when out of view.
-    const th = Math.PI + player.yaw;
-    const cs = Math.cos(th);
-    const sn = Math.sin(th);
-    const rim = W / 2 - 10;
+    // Icons in screen space (upright), pinned to the rim when they are targets.
+    const rim = W / 2 - 10 * dpr;
     for (const m of markers) {
-      const lx = ((m.x + WORLD.half) * scale - px) * zoom;
-      const lz = ((m.z + WORLD.half) * scale - pz) * zoom;
-      let sx = lx * cs - lz * sn;
-      let sy = lx * sn + lz * cs;
+      let sx = tf.a * m.x + tf.c * m.z + tf.e - W / 2;
+      let sy = tf.b * m.x + tf.d * m.z + tf.f - H / 2;
       const d = Math.hypot(sx, sy);
       if (d > rim) {
         if (!m.target) continue;
         sx *= rim / d;
         sy *= rim / d;
       }
-      drawMarker(ctx, W / 2 + sx, H / 2 + sy, m, W * 0.06);
+      if (m.kind === 'waypoint') drawPin(ctx, W / 2 + sx, H / 2 + sy, W * 0.05);
+      else drawIcon(ctx, W / 2 + sx, H / 2 + sy, m, W * (m.kind === 'festival' ? 0.1 : 0.075));
     }
-    // Player arrow (always centre, pointing up)
-    ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.fillStyle = AMBER;
-    ctx.strokeStyle = '#0b0e12';
-    ctx.lineWidth = 2;
-    const a = W * 0.045;
-    ctx.beginPath();
-    ctx.moveTo(0, -a * 1.3);
-    ctx.lineTo(a, a);
-    ctx.lineTo(0, a * 0.45);
-    ctx.lineTo(-a, a);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    drawPlayer(ctx, W / 2, H / 2, 0, W * 0.042);
     ctx.strokeStyle = 'rgba(230,238,243,0.35)';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * dpr;
     ctx.beginPath();
     ctx.arc(W / 2, H / 2, W / 2 - 2, 0, Math.PI * 2);
     ctx.stroke();
-  }
-
-  // Full-screen north-up map with every activity, the player and a legend.
-  drawWorldMap(canvas, player, cars, markers, totals) {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const Wc = Math.round(canvas.clientWidth * dpr);
-    const Hc = Math.round(canvas.clientHeight * dpr);
-    if (canvas.width !== Wc || canvas.height !== Hc) {
-      canvas.width = Wc;
-      canvas.height = Hc;
-    }
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, Wc, Hc);
-    ctx.fillStyle = 'rgba(6,9,13,0.78)';
-    ctx.fillRect(0, 0, Wc, Hc);
-    const size = Math.min(Wc, Hc) * 0.84;
-    const ox = (Wc - size) / 2;
-    const oy = (Hc - size) / 2 + Hc * 0.02;
-    ctx.drawImage(this.mapImage, ox, oy, size, size);
-    ctx.strokeStyle = 'rgba(230,238,243,0.4)';
-    ctx.lineWidth = 2 * dpr;
-    ctx.strokeRect(ox, oy, size, size);
-    const toX = (x) => ox + ((x + WORLD.half) / WORLD.size) * size;
-    const toY = (z) => oy + ((z + WORLD.half) / WORLD.size) * size;
-    for (const c of cars) {
-      ctx.fillStyle = c.color;
-      ctx.beginPath();
-      ctx.arc(toX(c.x), toY(c.z), 4 * dpr, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    for (const m of markers) drawMarker(ctx, toX(m.x), toY(m.z), m, 17 * dpr, true);
-    // Player
-    ctx.save();
-    ctx.translate(toX(player.x), toY(player.z));
-    ctx.rotate(Math.atan2(Math.cos(player.yaw), Math.sin(player.yaw)) + Math.PI / 2);
-    ctx.fillStyle = AMBER;
-    ctx.strokeStyle = '#0b0e12';
-    ctx.lineWidth = 2 * dpr;
-    const a = 11 * dpr;
-    ctx.beginPath();
-    ctx.moveTo(0, -a * 1.3);
-    ctx.lineTo(a, a);
-    ctx.lineTo(0, a * 0.45);
-    ctx.lineTo(-a, a);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-    // Title and legend
-    ctx.fillStyle = ICE;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.font = `800 ${22 * dpr}px "Big Shoulders Display", "Arial Narrow", sans-serif`;
-    ctx.fillText(`KARTE · ${totals.stars}/${totals.max} ★`, ox, Math.max(8 * dpr, oy - 30 * dpr));
-    const legend = [
-      ['C', '#3fd0ff', 'Checkpoint-Lauf'],
-      ['D', '#ff4fd8', 'Drift-Zone'],
-      ['B', '#f2a541', 'Blitzer'],
-      ['S', '#7dff7a', 'Sprungschanze'],
-    ];
-    ctx.font = `600 ${13 * dpr}px "Barlow", sans-serif`;
-    let lx = ox;
-    const ly = oy + size + 10 * dpr;
-    for (const [g, col, label] of legend) {
-      drawMarker(ctx, lx + 9 * dpr, ly + 9 * dpr, { glyph: g, color: col }, 16 * dpr);
-      ctx.font = `600 ${13 * dpr}px "Barlow", sans-serif`;
-      ctx.fillStyle = ICE;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, lx + 22 * dpr, ly + 9 * dpr);
-      lx += ctx.measureText(label).width + 44 * dpr;
-    }
+    // North marker on the rim: world -z maps to (sin th, -cos th) on screen.
+    const ndx = sn;
+    const ndy = -cs;
+    ctx.fillStyle = '#e6eef3';
+    ctx.font = `800 ${Math.round(W * 0.075)}px "Barlow", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('N', W / 2 + ndx * (W / 2 - 12 * dpr), H / 2 + ndy * (H / 2 - 12 * dpr));
   }
 
   drawGauge(car) {
@@ -408,31 +225,112 @@ export class Hud {
     this.msgTimer = seconds;
   }
 
-  update(dt) {
-    if (this.msgTimer > 0) {
-      this.msgTimer -= dt;
-      if (this.msgTimer <= 0) this.el('message').hidden = true;
-    }
-  }
-
-  setRace({ position, total, lap, laps, lapTime, bestLap, mode, driftTotal, driftCurrent, driftMult }) {
+  setRace({ position, total, lap, laps, lapTime, bestLap, mode }) {
     const race = mode === 'race';
     this.show('pos-block', race);
     this.show('lap-block', mode !== 'free');
     this.show('time-block', mode !== 'free');
-    this.show('drift-block', mode === 'free');
+    this.show('level-block', mode === 'free');
     if (race) this.setText('pos-value', `${position}/${total}`);
     if (mode !== 'free') {
       this.setText('lap-value', mode === 'race' ? `${Math.min(lap, laps)}/${laps}` : String(Math.max(1, lap)));
       this.setText('time-value', formatTime(lapTime));
       this.setText('best-value', formatTime(bestLap));
-    } else {
-      this.setText('drift-total', Math.round(driftTotal).toLocaleString('de-DE'));
-      const cur = this.el('drift-current');
-      if (driftCurrent > 0) {
-        cur.hidden = false;
-        this.setText('drift-current', `+${Math.round(driftCurrent).toLocaleString('de-DE')}  ×${driftMult}`);
-      } else cur.hidden = true;
+    }
+  }
+
+  setLevel({ level, into, need, fraction }) {
+    this.setText('level-value', String(level));
+    this.el('xp-fill').style.width = `${Math.round(fraction * 100)}%`;
+    this.setText('xp-text', `${into.toLocaleString('de-DE')} / ${need.toLocaleString('de-DE')} XP`);
+  }
+
+  // Skill chain display: latest skills, chain total with multiplier and the time left to bank.
+  showSkills(chain, bankTime) {
+    const box = this.el('skills');
+    if (this.skillHold > 0) return; // showing a banked or broken chain
+    if (!chain.active) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    box.classList.remove('banked', 'broken');
+    const feed = this.el('skill-feed');
+    const key = chain.feed.map((f) => `${f.name}:${Math.round(f.points)}`).join('|');
+    if (key !== this.skillKey) {
+      this.skillKey = key;
+      feed.textContent = '';
+      chain.feed.slice(0, 3).forEach((f) => {
+        const d = document.createElement('div');
+        d.textContent = f.name;
+        const b = document.createElement('b');
+        b.textContent = `+${Math.round(f.points).toLocaleString('de-DE')}`;
+        d.appendChild(b);
+        feed.appendChild(d);
+      });
+    }
+    this.setText('skill-points', Math.round(chain.points).toLocaleString('de-DE'));
+    this.setText('skill-mult', `×${chain.mult}`);
+    this.el('skill-timer').style.width = `${Math.round(clamp(chain.timer / bankTime, 0, 1) * 100)}%`;
+  }
+
+  // Result of a finished chain, shown for a moment: banked (green) or broken by a crash (red).
+  skillResult(total, banked) {
+    const box = this.el('skills');
+    box.hidden = false;
+    box.classList.toggle('banked', banked);
+    box.classList.toggle('broken', !banked);
+    this.el('skill-feed').textContent = '';
+    const d = document.createElement('div');
+    d.textContent = banked ? 'Skill-Kette gesichert' : 'Skill-Kette gerissen';
+    this.el('skill-feed').appendChild(d);
+    this.setText('skill-points', total.toLocaleString('de-DE'));
+    this.setText('skill-mult', '');
+    this.el('skill-timer').style.width = '0%';
+    this.skillKey = '';
+    this.skillHold = 1.8;
+  }
+
+  // Small XP notices on the right: "+500 XP Entdeckung".
+  feed(text, xp = 0) {
+    const box = this.el('feed');
+    const d = document.createElement('div');
+    if (xp) {
+      const b = document.createElement('b');
+      b.textContent = `+${Math.round(xp).toLocaleString('de-DE')} XP`;
+      d.appendChild(b);
+    }
+    d.appendChild(document.createTextNode(text));
+    box.prepend(d);
+    while (box.children.length > 4) box.lastChild.remove();
+    setTimeout(() => d.classList.add('out'), 2600);
+    setTimeout(() => d.remove(), 3200);
+  }
+
+  banner(kind, title, sub = '', seconds = 3.2) {
+    const b = this.el('banner');
+    this.setText('banner-kind', kind);
+    this.setText('banner-title', title);
+    this.setText('banner-sub', sub);
+    b.hidden = false;
+    b.style.animation = 'none';
+    void b.offsetWidth;
+    b.style.animation = '';
+    this.bannerTimer = seconds;
+  }
+
+  update(dt) {
+    if (this.msgTimer > 0) {
+      this.msgTimer -= dt;
+      if (this.msgTimer <= 0) this.el('message').hidden = true;
+    }
+    if (this.bannerTimer > 0) {
+      this.bannerTimer -= dt;
+      if (this.bannerTimer <= 0) this.el('banner').hidden = true;
+    }
+    if (this.skillHold > 0) {
+      this.skillHold -= dt;
+      if (this.skillHold <= 0) this.el('skills').hidden = true;
     }
   }
 }

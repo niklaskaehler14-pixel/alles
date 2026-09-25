@@ -1,13 +1,19 @@
-// Open-world layer for free roam: checkpoint runs, drift zones, speed traps and jump ramps,
-// their world markers, HUD and saved progress.
+// Open-world layer for free roam: checkpoint runs, drift zones, speed traps, jump ramps and speed
+// zones, bonus boards and discoveries, their world markers, HUD, map data and saved progress.
 import * as THREE from 'three';
 import { starsFor, rampSurface } from './activities.js';
 import { ROAD } from './config.js';
 import { clamp, formatTime, wrapAngle } from './util.js';
+import { RoadDiscovery } from './navigation.js';
+import { ICON_COLORS } from './maprender.js';
 import * as TX from './textures.js';
 
 const PROGRESS_KEY = 'nordkamm.progress.v1';
-export const ACTIVITY_COLORS = { run: '#3fd0ff', drift: '#ff4fd8', trap: '#f2a541', jump: '#7dff7a' };
+export const ACTIVITY_COLORS = { run: ICON_COLORS.run, drift: ICON_COLORS.drift, trap: ICON_COLORS.trap, jump: ICON_COLORS.jump, zone: ICON_COLORS.zone };
+const XP = { star: 1000, finish: 150, landmark: 500, board: 1000, road: 5 };
+const LABELS = { run: 'Checkpoint-Lauf', drift: 'Drift-Zone', trap: 'Blitzer', jump: 'Sprungschanze', zone: 'Tempozone', landmark: 'Sehenswürdigkeit', festival: 'Festival', board: 'Bonusschild' };
+const fmt = (n) => Math.round(n).toLocaleString('de-DE');
+const km = (m) => `${(m / 1000).toFixed(2).replace('.', ',')} km`;
 const STAR = '★';
 const NO_STAR = '☆';
 
@@ -39,6 +45,14 @@ export class OpenWorld {
     this.group.visible = false;
     game.scene.add(this.group);
     this.progress = loadProgress();
+    this.career = game.career;
+    this.discovery = new RoadDiscovery(game.data, this.career.roads);
+    this.discoverTimer = 0;
+    this.saveTimer = 0;
+    this.roadXp = 0;
+    this.roadMilestone = Math.floor(this.discovery.fraction * 10);
+    this.debris = [];
+    this.speedZone = null;
     this.enabled = false;
     this.run = null;
     this.zone = null;
@@ -63,6 +77,14 @@ export class OpenWorld {
     return starsFor(b, item.goals);
   }
 
+  // XP for a result: every newly earned star plus a little for finishing.
+  #reward(kind, item, before) {
+    const after = this.starsOf(kind, item);
+    const xp = XP.finish + Math.max(0, after - before) * XP.star;
+    this.career.award(xp, item.name);
+    return after;
+  }
+
   #record(id, value, lowerIsBetter) {
     const old = this.progress[id];
     const better = old === undefined || (lowerIsBetter ? value < old : value > old);
@@ -80,7 +102,8 @@ export class OpenWorld {
     for (const z of d.driftZones) stars += this.starsOf('drift', z);
     for (const t of d.speedTraps) stars += this.starsOf('trap', t);
     for (const j of d.ramps) stars += this.starsOf('jump', j);
-    const count = d.routes.length + d.driftZones.length + d.speedTraps.length + d.ramps.length;
+    for (const z of d.speedZones) stars += this.starsOf('zone', z);
+    const count = d.routes.length + d.driftZones.length + d.speedTraps.length + d.ramps.length + d.speedZones.length;
     return { stars, max: count * 3, count };
   }
 
@@ -253,6 +276,80 @@ export class OpenWorld {
     });
 
     this.#buildTrails();
+    this.#buildSpeedZones();
+    this.#buildBoards();
+  }
+
+  // Speed zones: yellow arches at the start and the end of the measured stretch.
+  #buildSpeedZones() {
+    const pillarGeo = new THREE.BoxGeometry(0.6, 7, 0.6);
+    pillarGeo.translate(0, 3.5, 0);
+    const pillarMat = new THREE.MeshStandardMaterial({ color: '#2b2a22', metalness: 0.5, roughness: 0.4, emissive: ACTIVITY_COLORS.zone, emissiveIntensity: 0.35 });
+    const roads = [this.track, ...this.data.branches];
+    this.zoneGates = this.data.speedZones.map((z) => {
+      const road = roads.find((r) => (r.id || 'circuit') === z.roadId) || this.track;
+      z.road = road;
+      const ht = road.halfTotal || ROAD.halfTotal;
+      const parts = [];
+      for (const [s, title] of [
+        [z.s0, 'Tempozone'],
+        [z.s0 + z.length, 'Ziel'],
+      ]) {
+        const p = road.pointAt(s, 0, {});
+        for (const sd of [1, -1]) {
+          const pp = road.pointAt(s, sd * (ht + 1.2), {});
+          const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+          pillar.position.set(pp.x, this.#groundY(pp.x, pp.z), pp.z);
+          pillar.castShadow = true;
+          this.group.add(pillar);
+          this.data.colliders.addCircle(pp.x, pp.z, 0.5, 'pole');
+        }
+        const mat = new THREE.MeshBasicMaterial({ map: TX.labelTexture(title, z.name, ACTIVITY_COLORS.zone), toneMapped: false });
+        for (const turn of [Math.PI, 0]) {
+          const banner = new THREE.Mesh(new THREE.PlaneGeometry(2 * ht + 2.4, 2.2), mat);
+          banner.position.set(p.x, p.h + 7.4, p.z);
+          banner.rotation.y = p.heading + turn;
+          this.group.add(banner);
+          parts.push(banner);
+        }
+      }
+      const p0 = road.pointAt(z.s0, 0, {});
+      const beam = this.#beam(p0.x, p0.h, p0.z, ACTIVITY_COLORS.zone, 80, 1.1);
+      return { zone: z, parts, beam };
+    });
+  }
+
+  // Bonus boards: orange signs on two posts, smashed by driving through them.
+  #buildBoards() {
+    const tex = TX.bonusBoardTexture();
+    const faceMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, emissive: '#ff8a1f', emissiveIntensity: 0.15 });
+    const backMat = new THREE.MeshStandardMaterial({ color: '#d8611a', roughness: 0.7 });
+    const postMat = new THREE.MeshStandardMaterial({ color: '#3a3f46', metalness: 0.5, roughness: 0.5 });
+    const face = new THREE.PlaneGeometry(3.2, 2);
+    const back = new THREE.PlaneGeometry(3.2, 2);
+    back.rotateY(Math.PI);
+    const post = new THREE.CylinderGeometry(0.07, 0.07, 2.4, 6);
+    post.translate(0, 1.2, 0);
+    this.boardParts = { faceMat, backMat, postMat, face, back, post };
+    this.boardMarkers = this.data.bonusBoards.map((b) => {
+      const g = new THREE.Group();
+      g.position.set(b.x, b.y, b.z);
+      g.rotation.y = b.yaw;
+      for (const sd of [-1, 1]) {
+        const m = new THREE.Mesh(post, postMat);
+        m.position.x = sd * 1.35;
+        g.add(m);
+      }
+      const f = new THREE.Mesh(face, faceMat);
+      f.position.y = 2.6;
+      const bk = new THREE.Mesh(back, backMat);
+      bk.position.y = 2.6;
+      g.add(f, bk);
+      g.traverse((o) => (o.castShadow = true));
+      g.visible = !this.career.boards.has(b.id);
+      this.group.add(g);
+      return { board: b, group: g };
+    });
   }
 
   #rampGeometry(r) {
@@ -374,6 +471,7 @@ export class OpenWorld {
     this.group.visible = on;
     this.cancelRun(true);
     this.zone = null;
+    this.speedZone = null;
     this.jump = null;
     this.holding = false;
     this.trapCooldown.clear();
@@ -456,7 +554,9 @@ export class OpenWorld {
   #finishRun() {
     const r = this.run.route;
     const t = this.run.time;
+    const before = this.starsOf('run', r);
     const better = this.#record(r.id, t, true);
+    this.#reward('run', r, before);
     const stars = starsFor(t, r.medals, true);
     const medal = ['Ziel', 'Bronze', 'Silber', 'Gold'][stars];
     this.game.hud.message(`${medal} · ${formatTime(t)}`, 3, stars >= 3 ? 'go' : 'info');
@@ -499,12 +599,188 @@ export class OpenWorld {
     else {
       this.#checkRunStart(v);
       this.#updateZone(v, q);
+      this.#updateSpeedZone(dt, v);
     }
     if (!this.holding) {
       this.#updateTraps(v);
       this.#updateJump(dt, v);
+      this.#updateBoards(v);
     }
+    this.#updateDebris(dt);
+    this.#updateDiscovery(dt, v);
     this.#updateHud(v);
+  }
+
+  // ------------------------------------------------------------------ discoveries
+  #updateDiscovery(dt, v) {
+    this.discoverTimer -= dt;
+    this.saveTimer -= dt;
+    if (this.discoverTimer > 0) return;
+    this.discoverTimer = 0.25;
+    const added = this.discovery.visit(v.x, v.z, 32);
+    if (added) {
+      this.roadXp += added * XP.road;
+      const tenth = Math.floor(this.discovery.fraction * 10);
+      if (tenth > this.roadMilestone) {
+        this.roadMilestone = tenth;
+        this.career.award(this.roadXp + 500, `Straßen entdeckt: ${tenth * 10} %`);
+        this.roadXp = 0;
+      }
+    }
+    if (this.saveTimer <= 0) {
+      this.saveTimer = 4;
+      if (this.roadXp >= 250) {
+        this.career.award(this.roadXp, 'Neue Straßen entdeckt');
+        this.roadXp = 0;
+      }
+      const roads = this.discovery.save();
+      if (roads !== this.career.roads) {
+        this.career.roads = roads;
+        this.career.save();
+      }
+    }
+    // Landmarks
+    for (const m of this.data.landmarks) {
+      if (this.career.found.has(m.id)) continue;
+      if (Math.hypot(v.x - m.x, v.z - m.z) > m.radius) continue;
+      this.career.discover(m.id);
+      this.game.hud.banner('Neuer Ort entdeckt', m.name, `+${fmt(XP.landmark)} XP · Schnellreise freigeschaltet`);
+      this.game.audio.chime();
+      this.career.award(XP.landmark, m.name);
+    }
+    // Activities become fast-travel targets once you have been close.
+    for (const it of this.#activityList()) {
+      if (this.career.found.has(it.id)) continue;
+      if (Math.hypot(v.x - it.x, v.z - it.z) > 140) continue;
+      this.career.discover(it.id);
+      this.game.hud.feed(`Neu auf der Karte: ${it.name}`);
+    }
+  }
+
+  // ------------------------------------------------------------------ bonus boards
+  #updateBoards(v) {
+    if (v.speed < 4) return;
+    for (const m of this.boardMarkers) {
+      if (!m.group.visible) continue;
+      const b = m.board;
+      if (Math.abs(v.x - b.x) > 4 || Math.abs(v.z - b.z) > 4) continue;
+      if (Math.hypot(v.x - b.x, v.z - b.z) > 3.4 || Math.abs(v.y - b.y) > 3) continue;
+      m.group.visible = false;
+      this.career.smash(b.id);
+      this.#shatter(m, v);
+      this.game.audio.crash(6);
+      this.game.onBoardSmashed(b);
+    }
+  }
+
+  // Board splinters fly off in the direction of travel and settle on the ground.
+  #shatter(m, v) {
+    const P = this.boardParts;
+    const b = m.board;
+    const pieces = [
+      [new THREE.PlaneGeometry(1.6, 2), P.faceMat, -0.8],
+      [new THREE.PlaneGeometry(1.6, 2), P.faceMat, 0.8],
+      [P.post, P.postMat, -1.35],
+      [P.post, P.postMat, 1.35],
+    ];
+    const cs = Math.cos(b.yaw);
+    const sn = Math.sin(b.yaw);
+    if (!P.debrisMat) {
+      P.debrisMat = P.faceMat.clone();
+      P.debrisMat.side = THREE.DoubleSide;
+    }
+    for (const [geo, mat, off] of pieces) {
+      const face = mat === P.faceMat;
+      const mesh = new THREE.Mesh(geo, face ? P.debrisMat : mat);
+      const x = b.x + cs * off;
+      const z = b.z - sn * off;
+      mesh.position.set(x, b.y + (face ? 2.6 : 0), z);
+      mesh.rotation.set(0, b.yaw, 0);
+      mesh.castShadow = true;
+      this.group.add(mesh);
+      this.debris.push({
+        mesh,
+        vx: v.vx * (0.7 + Math.random() * 0.4) + (Math.random() - 0.5) * 6,
+        vz: v.vz * (0.7 + Math.random() * 0.4) + (Math.random() - 0.5) * 6,
+        vy: 5 + Math.random() * 6,
+        spin: [(Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12],
+        life: 4,
+      });
+    }
+  }
+
+  #updateDebris(dt) {
+    for (let i = this.debris.length - 1; i >= 0; i--) {
+      const d = this.debris[i];
+      d.life -= dt;
+      const m = d.mesh;
+      const ground = this.#groundY(m.position.x, m.position.z) + 0.1;
+      if (m.position.y > ground || d.vy > 0) {
+        d.vy -= 9.81 * dt;
+        m.position.x += d.vx * dt;
+        m.position.y += d.vy * dt;
+        m.position.z += d.vz * dt;
+        m.rotation.x += d.spin[0] * dt;
+        m.rotation.y += d.spin[1] * dt;
+        m.rotation.z += d.spin[2] * dt;
+        if (m.position.y < ground) {
+          m.position.y = ground;
+          d.vy = -d.vy * 0.25;
+          d.vx *= 0.5;
+          d.vz *= 0.5;
+          if (Math.abs(d.vy) < 1) d.vy = 0;
+        }
+      }
+      if (d.life <= 0) {
+        this.group.remove(m);
+        if (m.geometry !== this.boardParts.post) m.geometry.dispose();
+        this.debris.splice(i, 1);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ speed zones
+  #updateSpeedZone(dt, v) {
+    const sz = this.speedZone;
+    if (sz) {
+      const z = sz.zone;
+      const road = z.road;
+      const q = road.nearest(v.x, v.z, -1, this.q, 2);
+      sz.time += dt;
+      const into = road.closed ? road.wrapS(q.s - z.s0) : q.s - z.s0;
+      if (q.index < 0 || q.dist > 30 || (into > road.length / 2 && road.closed) || into < -25 || sz.time > 60) {
+        this.speedZone = null;
+        this.game.hud.message('Tempozone verlassen', 1.2, 'warn');
+        return;
+      }
+      sz.avg = (Math.max(0, into) / Math.max(0.1, sz.time)) * 3.6;
+      if (into >= z.length) {
+        this.speedZone = null;
+        const avg = Math.round((z.length / sz.time) * 3.6);
+        const stars = starsFor(avg, z.goals);
+        const before = this.starsOf('zone', z);
+        const better = this.#record(z.id, avg, false);
+        this.#reward('zone', z, before);
+        this.game.hud.message(`Ø ${avg} km/h`, 2, stars >= 3 ? 'go' : 'info');
+        this.#toastResult(`${z.name}: Ø ${avg} km/h ${starText(stars)}${better ? ' · Rekord' : ''}`);
+        if (stars > 0) this.game.audio.chime();
+      }
+      return;
+    }
+    if (this.zone) return;
+    for (const g of this.zoneGates) {
+      const z = g.zone;
+      if (Math.abs(v.x - z.x) > 16 || Math.abs(v.z - z.z) > 16) continue;
+      const q = z.road.nearest(v.x, v.z, -1, this.q, 2);
+      if (q.index < 0 || q.dist > 12) continue;
+      const into = z.road.closed ? z.road.wrapS(q.s - z.s0) : q.s - z.s0;
+      const forward = Math.sin(v.yaw) * q.tx + Math.cos(v.yaw) * q.tz > 0.5;
+      if (into >= 0 && into < 8 && forward && v.speed > 5) {
+        this.speedZone = { zone: z, time: 0, avg: 0 };
+        this.game.hud.message('Tempozone', 1, 'info');
+        return;
+      }
+    }
   }
 
   #checkRunStart(v) {
@@ -521,8 +797,8 @@ export class OpenWorld {
     const prompt = this.el('prompt');
     if (nearest && nearest.d < 60 && !this.zone) {
       prompt.hidden = false;
-      prompt.textContent = nearest.d < 8 ? `${nearest.r.name} startet …` : `Checkpoint-Lauf „${nearest.r.name}“ · in den Ring fahren`;
-      if (nearest.d < 7 && v.speed < 45) {
+      prompt.textContent = nearest.d < 8 ? (v.speed < 9 ? `${nearest.r.name} startet …` : 'Langsamer: im Ring anhalten') : `Checkpoint-Lauf „${nearest.r.name}“ · im Ring anhalten`;
+      if (nearest.d < 7 && v.speed < 9) {
         prompt.hidden = true;
         this.#startRun(nearest.r);
       }
@@ -601,7 +877,9 @@ export class OpenWorld {
       return;
     }
     const stars = starsFor(score, z.goals);
+    const before = this.starsOf('drift', z);
     const better = this.#record(z.id, score, false);
+    this.#reward('drift', z, before);
     this.game.hud.message(`${score.toLocaleString('de-DE')} Punkte`, 2.4, stars >= 3 ? 'go' : 'info');
     this.#toastResult(`${z.name}: ${score.toLocaleString('de-DE')} Punkte ${starText(stars)}${better && score > 0 ? ' · Rekord' : ''}`);
     if (stars > 0) this.game.audio.chime();
@@ -616,7 +894,9 @@ export class OpenWorld {
       this.trapCooldown.set(t.id, this.time + 6);
       const kmh = Math.round(v.speed * 3.6);
       const stars = starsFor(kmh, t.goals);
+      const before = this.starsOf('trap', t);
       const better = this.#record(t.id, kmh, false);
+      this.#reward('trap', t, before);
       this.#flash();
       this.game.hud.message(`${kmh} km/h`, 1.8, stars >= 3 ? 'go' : 'info');
       this.#toastResult(`${t.name}: ${kmh} km/h ${starText(stars)}${better ? ' · Rekord' : ''}`);
@@ -658,7 +938,9 @@ export class OpenWorld {
         if (j.t > 0.35 && dist > 6) {
           const r = j.ramp;
           const stars = starsFor(dist, r.goals);
+          const before = this.starsOf('jump', r);
           const better = this.#record(r.id, Math.round(dist * 10) / 10, false);
+          this.#reward('jump', r, before);
           this.game.hud.message(`${dist.toFixed(1).replace('.', ',')} m`, 2, stars >= 3 ? 'go' : 'info');
           this.#toastResult(`${r.name}: ${dist.toFixed(1).replace('.', ',')} m ${starText(stars)}${better ? ' · Rekord' : ''}`);
           const marker = this.rampMarkers.find((m) => m.ramp === r);
@@ -709,6 +991,19 @@ export class OpenWorld {
       return;
     }
     nav.hidden = true;
+    if (this.speedZone) {
+      const z = this.speedZone.zone;
+      const avg = Math.round(this.speedZone.avg);
+      const next = z.goals.find((g) => g > avg);
+      this.#hud({
+        kind: 'Tempozone',
+        title: z.name,
+        value: `Ø ${avg} km/h`,
+        sub: next ? `Nächster Stern ab Ø ${next} km/h` : 'Alle Sterne in Reichweite',
+        color: ACTIVITY_COLORS.zone,
+      });
+      return;
+    }
     if (this.zone) {
       const z = this.zone.zone;
       const s = Math.round(this.zone.score);
@@ -725,23 +1020,157 @@ export class OpenWorld {
     this.#hud(null);
   }
 
-  // ------------------------------------------------------------------ map markers
+  // ------------------------------------------------------------------ map data
+  // Every activity with its map position: runs at their start, zones at their entry.
+  #activityList() {
+    const d = this.data;
+    const list = [];
+    for (const r of d.routes) list.push({ kind: 'run', id: r.id, name: r.name, x: r.start.x, z: r.start.z, item: r });
+    for (const z of d.driftZones) {
+      const p = this.track.pointAt(z.s0, 0, {});
+      list.push({ kind: 'drift', id: z.id, name: z.name, x: p.x, z: p.z, item: z, heading: p.heading });
+    }
+    for (const t of d.speedTraps) list.push({ kind: 'trap', id: t.id, name: t.name, x: t.x, z: t.z, item: t, heading: t.heading });
+    for (const r of d.ramps) list.push({ kind: 'jump', id: r.id, name: r.name, x: r.x, z: r.z, item: r });
+    for (const z of d.speedZones) {
+      const p = z.road ? z.road.pointAt(z.s0, 0, {}) : { heading: 0 };
+      list.push({ kind: 'zone', id: z.id, name: z.name, x: z.x, z: z.z, item: z, heading: p.heading });
+    }
+    return list;
+  }
+
+  // Place to put the car for a fast travel to an activity: just before it, facing it.
+  #travelPose(a) {
+    if (a.kind === 'run') {
+      const r = a.item;
+      const cp = r.checkpoints[0];
+      const h = Math.atan2(cp.x - r.start.x, cp.z - r.start.z);
+      return { x: r.start.x - Math.sin(h) * 28, z: r.start.z - Math.cos(h) * 28, heading: h };
+    }
+    if (a.kind === 'jump') {
+      const r = a.item;
+      return { x: r.x - Math.sin(r.yaw) * 90, z: r.z - Math.cos(r.yaw) * 90, heading: r.yaw };
+    }
+    if (a.heading !== undefined) return { x: a.x - Math.sin(a.heading) * 160, z: a.z - Math.cos(a.heading) * 160, heading: a.heading, onRoad: true };
+    return null;
+  }
+
+  #stats(kind, item) {
+    const b = this.best(item.id);
+    const none = '–';
+    switch (kind) {
+      case 'run':
+        return [
+          ['Bestzeit', b === undefined ? none : formatTime(b)],
+          ['Gold · Silber · Bronze', item.medals.map((m) => formatTime(m).replace(/\.\d+$/, '')).join(' · ')],
+          ['Strecke', km(item.length)],
+          ['Tore', String(item.checkpoints.length)],
+        ];
+      case 'drift':
+        return [
+          ['Rekord', b === undefined ? none : `${fmt(b)} Punkte`],
+          ['Sterne ab', item.goals.map(fmt).join(' · ')],
+          ['Länge', km(item.length)],
+        ];
+      case 'trap':
+        return [
+          ['Rekord', b === undefined ? none : `${b} km/h`],
+          ['Sterne ab', item.goals.map((g) => `${g}`).join(' · ') + ' km/h'],
+        ];
+      case 'jump':
+        return [
+          ['Rekord', b === undefined ? none : `${String(b).replace('.', ',')} m`],
+          ['Sterne ab', item.goals.join(' · ') + ' m'],
+        ];
+      case 'zone':
+        return [
+          ['Rekord', b === undefined ? none : `Ø ${b} km/h`],
+          ['Sterne ab', `Ø ${item.goals.join(' · ')} km/h`],
+          ['Länge', `${item.length} m`],
+        ];
+      default:
+        return [];
+    }
+  }
+
+  // Items for the world map (activities, places, the festival and bonus boards).
+  mapItems() {
+    const out = [];
+    const blurbs = {
+      drift: 'Driften zwischen Start- und Ziel-Banner, die Punkte zählen',
+      trap: 'So schnell wie möglich am Blitzer vorbei',
+      jump: 'Mit Tempo auf die Schanze, gemessen wird die Weite',
+      zone: 'Durchschnittstempo zwischen den beiden gelben Toren',
+    };
+    for (const a of this.#activityList()) {
+      const stars = this.starsOf(a.kind, a.item);
+      out.push({
+        kind: a.kind,
+        id: a.id,
+        name: a.name,
+        label: LABELS[a.kind],
+        blurb: a.item.blurb || blurbs[a.kind] || '',
+        x: a.x,
+        z: a.z,
+        color: ACTIVITY_COLORS[a.kind],
+        stars,
+        done: stars >= 3,
+        stats: this.#stats(a.kind, a.item),
+        travel: this.#travelPose(a),
+      });
+    }
+    const F = this.data.festival;
+    for (const m of this.data.landmarks) {
+      const found = this.career.found.has(m.id);
+      const festival = m.id === 'lm-festival';
+      out.push({
+        kind: festival ? 'festival' : 'landmark',
+        id: m.id,
+        name: m.name,
+        label: festival ? 'Festival' : found ? 'Sehenswürdigkeit' : 'Unentdeckter Ort',
+        blurb: m.blurb,
+        x: m.x,
+        z: m.z,
+        color: festival ? ICON_COLORS.festival : ICON_COLORS.landmark,
+        locked: !found && !festival,
+        stats: festival
+          ? [
+              ['Fahrerstufe', String(this.career.level)],
+              ['Sterne', `${this.totals().stars}/${this.totals().max}`],
+            ]
+          : [
+              ['Status', found ? 'Entdeckt' : 'Noch nicht entdeckt'],
+              ['Belohnung', `${fmt(XP.landmark)} XP`],
+            ],
+        travel: festival ? { ...F.spawn } : null,
+      });
+    }
+    for (const m of this.boardMarkers) {
+      if (!m.group.visible) continue;
+      const b = m.board;
+      out.push({ kind: 'board', id: b.id, name: 'Bonusschild', label: 'Sammelobjekt', blurb: 'Durchfahren und zerstören', x: b.x, z: b.z, color: ICON_COLORS.board, stats: [['Belohnung', `${fmt(XP.board)} XP`]] });
+    }
+    return out;
+  }
+
+  // Icons for the minimap: the active run gate, or nearby activities, places and the festival.
   markers() {
     const out = [];
-    const d = this.data;
     if (this.run) {
       const cps = this.run.route.checkpoints;
       const cp = cps[Math.min(this.run.next, cps.length - 1)];
-      out.push({ x: cp.x, z: cp.z, color: ACTIVITY_COLORS.run, glyph: '◎', target: true });
+      out.push({ kind: 'run', x: cp.x, z: cp.z, color: ACTIVITY_COLORS.run, target: true });
       return out;
     }
-    for (const r of d.routes) out.push({ x: r.start.x, z: r.start.z, color: ACTIVITY_COLORS.run, glyph: 'C', name: r.name, stars: this.starsOf('run', r) });
-    for (const z of d.driftZones) {
-      const p = this.track.pointAt(z.s0, 0, {});
-      out.push({ x: p.x, z: p.z, color: ACTIVITY_COLORS.drift, glyph: 'D', name: z.name, stars: this.starsOf('drift', z) });
+    for (const a of this.#activityList()) {
+      const stars = this.starsOf(a.kind, a.item);
+      out.push({ kind: a.kind, x: a.x, z: a.z, color: ACTIVITY_COLORS[a.kind], stars, done: stars >= 3 });
     }
-    for (const t of d.speedTraps) out.push({ x: t.x, z: t.z, color: ACTIVITY_COLORS.trap, glyph: 'B', name: t.name, stars: this.starsOf('trap', t) });
-    for (const r of d.ramps) out.push({ x: r.x, z: r.z, color: ACTIVITY_COLORS.jump, glyph: 'S', name: r.name, stars: this.starsOf('jump', r) });
+    for (const m of this.data.landmarks) {
+      const festival = m.id === 'lm-festival';
+      if (!festival && !this.career.found.has(m.id)) continue;
+      out.push({ kind: festival ? 'festival' : 'landmark', x: m.x, z: m.z, color: festival ? ICON_COLORS.festival : ICON_COLORS.landmark });
+    }
     return out;
   }
 }

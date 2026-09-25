@@ -41,33 +41,34 @@ function speckle(ctx, w, h, count, colors, rng, size = 1.5) {
 }
 
 // Road ribbon: u = across (gravel | asphalt | gravel), v = 20 m along.
-export function roadTexture(aniso) {
+// `centre`: 'dashed' (circuit, lake road) or 'double' (touge: two solid lines, no overtaking).
+export function roadTexture(aniso, { width = 13, shoulder = 1.6, centre = 'dashed', seed = 11, tracks = [3.6, 5.2, 11.0, 12.6] } = {}) {
   const W = 512;
   const H = 1024;
   const c = canvas(W, H);
   const ctx = c.getContext('2d');
-  const rng = mulberry32(11);
-  const total = 16.2;
+  const rng = mulberry32(seed);
+  const total = width + 2 * shoulder;
   const px = (m) => (m / total) * W;
-  const shoulder = px(1.6);
+  const sh = px(shoulder);
   // Gravel shoulders
   ctx.fillStyle = '#7b7264';
   ctx.fillRect(0, 0, W, H);
   speckle(ctx, W, H, 26000, ['#8d8474', '#6a6255', '#9a917f', '#5d564b'], rng, 2.2);
   // Asphalt
   ctx.fillStyle = '#3b3d42';
-  ctx.fillRect(shoulder, 0, W - 2 * shoulder, H);
+  ctx.fillRect(sh, 0, W - 2 * sh, H);
   speckle(ctx, W, H, 60000, ['#45474d', '#33353a', '#4c4e54', '#2d2f33', '#56585d'], rng, 1.4);
   // Wheel tracks: slightly darker, polished lanes
   ctx.globalAlpha = 0.12;
   ctx.fillStyle = '#1e1f22';
-  for (const m of [3.6, 5.2, 11.0, 12.6]) ctx.fillRect(px(m) - 10, 0, 20, H);
+  for (const m of tracks) ctx.fillRect(px(m) - 10, 0, 20, H);
   ctx.globalAlpha = 1;
   // Cracks / patches
   ctx.strokeStyle = 'rgba(20,20,22,0.35)';
   ctx.lineWidth = 1.2;
   for (let i = 0; i < 18; i++) {
-    let x = shoulder + rng() * (W - 2 * shoulder);
+    let x = sh + rng() * (W - 2 * sh);
     let y = rng() * H;
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -78,18 +79,77 @@ export function roadTexture(aniso) {
     }
     ctx.stroke();
   }
-  // Edge lines (solid) and centre line (dashed, 6 m line / 4 m gap)
+  // Edge lines (solid) and centre line
   ctx.fillStyle = '#e9e7df';
   const lineW = px(0.18);
-  ctx.fillRect(shoulder + px(0.25), 0, lineW, H);
-  ctx.fillRect(W - shoulder - px(0.25) - lineW, 0, lineW, H);
+  ctx.fillRect(sh + px(0.25), 0, lineW, H);
+  ctx.fillRect(W - sh - px(0.25) - lineW, 0, lineW, H);
   const perM = H / 20;
-  for (let d = 0; d < 20; d += 10) ctx.fillRect(W / 2 - lineW / 2, d * perM, lineW, 6 * perM);
+  if (centre === 'double') {
+    ctx.fillStyle = '#f2c230';
+    ctx.fillRect(W / 2 - lineW * 1.6, 0, lineW, H);
+    ctx.fillRect(W / 2 + lineW * 0.6, 0, lineW, H);
+  } else for (let d = 0; d < 20; d += 10) ctx.fillRect(W / 2 - lineW / 2, d * perM, lineW, 6 * perM);
   // Worn paint
   ctx.globalCompositeOperation = 'multiply';
   speckle(ctx, W, H, 9000, ['#b8b6ae', '#d0cec6'], rng, 1.2);
   ctx.globalCompositeOperation = 'source-over';
   return finish(c, { aniso });
+}
+
+// Gravel road: packed brown surface with two worn wheel ruts and loose stones at the edges.
+export function gravelRoadTexture(aniso) {
+  const W = 512;
+  const H = 1024;
+  const c = canvas(W, H);
+  const ctx = c.getContext('2d');
+  const rng = mulberry32(23);
+  const g = ctx.createLinearGradient(0, 0, W, 0);
+  g.addColorStop(0, '#6c6450');
+  g.addColorStop(0.12, '#8a7c62');
+  g.addColorStop(0.5, '#958669');
+  g.addColorStop(0.88, '#8a7c62');
+  g.addColorStop(1, '#6c6450');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  speckle(ctx, W, H, 70000, ['#a3957a', '#7d705a', '#b1a488', '#6e6350', '#c2b597'], rng, 2.4);
+  // Ruts
+  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = '#5e5442';
+  for (const u of [0.3, 0.7]) ctx.fillRect(u * W - 26, 0, 52, H);
+  ctx.globalAlpha = 1;
+  // Loose stones on the crown and the verges
+  for (let i = 0; i < 900; i++) {
+    const edge = rng() < 0.6;
+    const x = edge ? (rng() < 0.5 ? rng() * 0.16 : 1 - rng() * 0.16) * W : (0.44 + rng() * 0.12) * W;
+    const y = rng() * H;
+    const r = 1 + rng() * 3;
+    ctx.fillStyle = rng() < 0.5 ? '#b9ad94' : '#5b5243';
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * (0.6 + rng() * 0.5), rng() * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return finish(c, { aniso });
+}
+
+// Guard rail: galvanised W-beam with a darker lower edge; u along 4 m, v across the beam.
+export function guardRailTexture() {
+  const c = canvas(256, 64);
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0, '#c9cdd1');
+  g.addColorStop(0.3, '#eef1f3');
+  g.addColorStop(0.5, '#9ea4aa');
+  g.addColorStop(0.7, '#e3e6e9');
+  g.addColorStop(1, '#8b9197');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 64);
+  const rng = mulberry32(31);
+  speckle(ctx, 256, 64, 900, ['rgba(90,80,70,0.25)', 'rgba(255,255,255,0.3)'], rng, 1.5);
+  // Bolts at the posts
+  ctx.fillStyle = '#6d737a';
+  for (const x of [4, 252]) for (const y of [22, 42]) ctx.fillRect(x - 3, y - 3, 6, 6);
+  return finish(c, {});
 }
 
 export function detailTexture() {
@@ -773,4 +833,193 @@ export function trailTexture() {
   const t = finish(c, { repeat: true });
   t.wrapS = THREE.ClampToEdgeWrapping;
   return t;
+}
+
+// ---------------------------------------------------------------- scenery (festival, neon, landmarks)
+
+// Festival plaza: asphalt disc with the logo in the middle and parking bays around the rim.
+export function plazaTexture(radius) {
+  const S = 1024;
+  const c = canvas(S, S);
+  const ctx = c.getContext('2d');
+  const rng = mulberry32(41);
+  const m = S / (radius * 2); // pixels per metre
+  ctx.fillStyle = '#3a3c41';
+  ctx.fillRect(0, 0, S, S);
+  speckle(ctx, S, S, 90000, ['#44464c', '#32343a', '#4b4d53', '#2c2e33'], rng, 1.6);
+  const cx = S / 2;
+  // Outer kerb band
+  ctx.strokeStyle = '#d9d4c8';
+  ctx.lineWidth = 0.5 * m;
+  ctx.beginPath();
+  ctx.arc(cx, cx, (radius - 1) * m, 0, Math.PI * 2);
+  ctx.stroke();
+  // Parking bays around the rim
+  ctx.strokeStyle = 'rgba(236,232,222,0.85)';
+  ctx.lineWidth = 0.16 * m;
+  for (let k = 0; k < 64; k++) {
+    const a = (k / 64) * Math.PI * 2;
+    const r0 = (radius - 7) * m;
+    const r1 = (radius - 1.8) * m;
+    if (k % 16 < 3) continue; // gaps for the entrances and the stage
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cx + Math.sin(a) * r0);
+    ctx.lineTo(cx + Math.cos(a) * r1, cx + Math.sin(a) * r1);
+    ctx.stroke();
+  }
+  // Painted ring with the logo
+  const logoR = 26 * m;
+  ctx.lineWidth = 1.2 * m;
+  ctx.strokeStyle = '#ff3fa4';
+  ctx.beginPath();
+  ctx.arc(cx, cx, logoR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#f2a541';
+  ctx.beginPath();
+  ctx.arc(cx, cx, logoR - 2 * m, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `900 ${9 * m}px "Big Shoulders Display", "Arial Narrow", sans-serif`;
+  ctx.fillText('NORDKAMM', cx, cx - 5 * m);
+  ctx.font = `800 ${5.5 * m}px "Big Shoulders Display", "Arial Narrow", sans-serif`;
+  ctx.fillStyle = '#f2a541';
+  ctx.fillText('FESTIVAL', cx, cx + 6 * m);
+  // Worn paint
+  ctx.globalCompositeOperation = 'multiply';
+  speckle(ctx, S, S, 16000, ['#b8b6ae', '#cfccc4'], rng, 1.6);
+  ctx.globalCompositeOperation = 'source-over';
+  return finish(c, { repeat: false });
+}
+
+// LED wall of the festival stage.
+export function stageScreenTexture() {
+  const c = canvas(1024, 512);
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 1024, 512);
+  g.addColorStop(0, '#2b0a3d');
+  g.addColorStop(0.5, '#a1145f');
+  g.addColorStop(1, '#f2a541');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1024, 512);
+  // Light rays
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = '#ffffff';
+  for (let k = 0; k < 14; k++) {
+    ctx.beginPath();
+    ctx.moveTo(512, 560);
+    ctx.lineTo(k * 80 - 40, -20);
+    ctx.lineTo(k * 80 + 10, -20);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '900 150px "Big Shoulders Display", "Arial Narrow", sans-serif';
+  ctx.fillText('NORDKAMM', 512, 210);
+  ctx.font = '800 76px "Big Shoulders Display", "Arial Narrow", sans-serif';
+  ctx.fillText('FESTIVAL', 512, 330);
+  // LED pixel grid
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  for (let x = 0; x < 1024; x += 8) ctx.fillRect(x, 0, 2, 512);
+  for (let y = 0; y < 512; y += 8) ctx.fillRect(0, y, 1024, 2);
+  return finish(c, { repeat: false });
+}
+
+// Banner for the entrance arches.
+export function festivalBannerTexture() {
+  const c = canvas(1024, 160);
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 1024, 0);
+  g.addColorStop(0, '#ff3fa4');
+  g.addColorStop(0.5, '#b336d6');
+  g.addColorStop(1, '#f2a541');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1024, 160);
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '900 92px "Big Shoulders Display", "Arial Narrow", sans-serif';
+  ctx.fillText('NORDKAMM FESTIVAL', 512, 84);
+  return finish(c, { repeat: false });
+}
+
+// Vertical neon signs: one column per word, letters stacked top to bottom.
+export const NEON_ATLAS_WORDS = ['RAMEN', 'ARCADE', 'HOTEL', 'KARAOKE', 'TUNING', 'GARAGE', 'SUSHI', 'NEON', 'CAFE', 'SAKE', 'UDON', 'MANGA', 'DRIFT', 'NACHT', 'KINO', 'BAR'];
+export function neonAtlasTexture() {
+  const cols = NEON_ATLAS_WORDS.length;
+  const cw = 128;
+  const H = 1024;
+  const c = canvas(cols * cw, H);
+  const ctx = c.getContext('2d');
+  const colors = ['#ff3fa4', '#29e3ff', '#ffb13b', '#7dff6a', '#b36bff', '#ff5a3c'];
+  NEON_ATLAS_WORDS.forEach((word, i) => {
+    const x0 = i * cw;
+    const color = colors[i % colors.length];
+    ctx.fillStyle = '#0c0d12';
+    ctx.fillRect(x0, 0, cw, H);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(x0 + 8, 8, cw - 16, H - 16);
+    const letters = [...word];
+    const step = (H - 60) / Math.max(letters.length, 4);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 18;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `800 ${Math.min(96, step * 0.82)}px "Big Shoulders Display", "Arial Narrow", sans-serif`;
+    letters.forEach((ch, k) => ctx.fillText(ch, x0 + cw / 2, 30 + step * (k + 0.5)));
+    ctx.shadowBlur = 0;
+  });
+  const t = finish(c, { repeat: false });
+  t.userData = { cols };
+  return t;
+}
+
+// Lighthouse tower: white and red bands.
+export function lighthouseTexture() {
+  const c = canvas(64, 256);
+  const ctx = c.getContext('2d');
+  for (let k = 0; k < 4; k++) {
+    ctx.fillStyle = k % 2 ? '#c8231c' : '#f1efe9';
+    ctx.fillRect(0, k * 64, 64, 64);
+  }
+  const rng = mulberry32(8);
+  speckle(ctx, 64, 256, 500, ['rgba(0,0,0,0.08)', 'rgba(255,255,255,0.1)'], rng, 2);
+  return finish(c, { repeat: false });
+}
+
+// Bonus board: orange sign with a star and the XP value.
+export function bonusBoardTexture() {
+  const c = canvas(512, 320);
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 320);
+  g.addColorStop(0, '#ff9a1f');
+  g.addColorStop(1, '#e8650c');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 512, 320);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 14;
+  ctx.strokeRect(14, 14, 484, 292);
+  // Star
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const r = k % 2 ? 42 : 96;
+    const a = -Math.PI / 2 + (k / 10) * Math.PI * 2;
+    ctx.lineTo(150 + Math.cos(a) * r, 162 + Math.sin(a) * r);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '900 92px "Big Shoulders Display", "Arial Narrow", sans-serif';
+  ctx.fillText('BONUS', 352, 128);
+  ctx.font = '800 58px "Big Shoulders Display", "Arial Narrow", sans-serif';
+  ctx.fillText('+1000 XP', 352, 214);
+  return finish(c, { repeat: false });
 }

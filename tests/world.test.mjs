@@ -6,6 +6,9 @@ import { AIDriver } from '../src/ai.js';
 import { Vehicle } from '../src/vehicle.js';
 import { ROAD, WORLD } from '../src/config.js';
 import { clamp, wrapAngle, formatTime } from '../src/util.js';
+import { RoadGraph, RoadDiscovery } from '../src/navigation.js';
+import { xpForLevel, levelForXp, Career } from '../src/career.js';
+import { SkillChain } from '../src/skills.js';
 
 const t0 = performance.now();
 const world = new WorldData().generateAll();
@@ -37,10 +40,21 @@ const again = new WorldData().generateAll();
 assert.equal(again.trees.length, world.trees.length);
 assert.equal(again.heightfield.heights[12345], world.heightfield.heights[12345]);
 // Open-world layout: every activity exists and the off-road runs are drivable.
-assert.equal(world.routes.length, 5);
+assert.equal(world.routes.length, 9);
 assert.equal(world.driftZones.length, 3);
 assert.equal(world.speedTraps.length, 4);
 assert.equal(world.ramps.length, 4);
+assert.equal(world.speedZones.length, 3);
+assert.ok(world.bonusBoards.length >= 12, 'bonus boards placed');
+assert.equal(world.landmarks.length, 7);
+assert.ok(world.festival && world.festival.gates.length === 2, 'festival with two entrances');
+// Scenery stays off the roads (the pass torii spans the touge, its pillars stand beside it).
+for (const road of [world.track, ...world.branches]) {
+  for (const b of world.bonusBoards) {
+    const q = road.nearest(b.x, b.z, -1, {}, 2);
+    if (q.index >= 0) assert.ok(q.dist > (road.halfTotal || ROAD.halfTotal) + 1, `bonus board ${b.id} on ${road.id || 'circuit'}`);
+  }
+}
 for (const r of world.routes) {
   assert.ok(r.checkpoints.length >= 5, `${r.name} has checkpoints`);
   for (let i = 1; i < r.points.length; i++) {
@@ -167,3 +181,120 @@ assert.ok(driven >= L, 'player car can complete a full lap');
 assert.ok(offRoad < 5, `autopilot stays on the road (${offRoad.toFixed(1)} s off)`);
 assert.ok(airTime < 3, 'no excessive jumps on the circuit');
 console.log('player lap checks passed');
+
+// --- Branch roads: drivable profiles, no obstacles, and the autopilot drives each one end to end
+assert.ok(world.branches.length >= 3, 'branch roads exist');
+for (const road of world.branches) {
+  for (let i = 1; i < road.count; i++) {
+    const g = Math.abs(road.h[i] - road.h[i - 1]) / road.spacing;
+    assert.ok(g < 0.105, `${road.id}: gradient ${(g * 100).toFixed(1)}% at ${i}`);
+    assert.ok(road.h[i] > WORLD.waterLevel + 2, `${road.id} above water at ${i}`);
+  }
+  for (const c of world.colliders.circles) {
+    if (c.kind === 'pole' || c.kind === 'rail') continue;
+    const q = road.nearest(c.x, c.z, -1, {}, 2);
+    if (q.index >= 0) assert.ok(q.dist > road.halfTotal + c.r - 0.2, `${c.kind} blocks ${road.id} at ${c.x.toFixed(0)},${c.z.toFixed(0)}`);
+  }
+}
+for (const road of world.branches) {
+  const v = new Vehicle();
+  const hint = [-1, -1, -1, -1];
+  const gq = {};
+  const gnd = (x, z, w, out) => {
+    const q = tr.nearest(x, z, hint[w], gq);
+    if (q.index >= 0) hint[w] = q.index;
+    out.h = world.groundHeight(x, z, q);
+    out.surface = world.surfaceAt(x, z, out.h, q);
+    return out;
+  };
+  for (const dir of [1, -1]) {
+    const s0 = dir > 0 ? 25 : road.length - 25;
+    const p0 = road.pointAt(s0, 0, {});
+    v.reset(p0.x, world.groundHeight(p0.x, p0.z, tr.nearest(p0.x, p0.z, -1, {})), p0.z, dir > 0 ? p0.heading : p0.heading + Math.PI);
+    let air = 0;
+    let off = 0;
+    let top = 0;
+    let bump = 0;
+    let s = s0;
+    const rq = {};
+    for (let step = 0; step < 120 * 300; step++) {
+      const n = road.nearest(v.x, v.z, -1, rq, 3);
+      if (n.index >= 0) s = n.s;
+      if (dir > 0 ? s > road.length - 30 : s < 30) break;
+      const look = 6 + v.speed * 0.45;
+      const p = road.pointAt(s + dir * look, 0, {});
+      const alpha = wrapAngle(Math.atan2(p.x - v.x, p.z - v.z) - v.yaw);
+      let target = 70;
+      for (let d = 0; d <= 160; d += 6) {
+        const k = Math.abs(road.curvatureAt(s + dir * d)) + 1e-4;
+        target = Math.min(target, Math.sqrt((road.surface ? 0.55 : 0.8) * 9.81 / k + 2 * 5 * d));
+      }
+      const vy0 = v.vy;
+      v.step(1 / 120, { steer: clamp(-alpha * 3, -1, 1), analogSteer: true, throttle: v.speed < target ? 1 : 0, brake: v.speed > target + 1 ? clamp((v.speed - target) / 3, 0, 1) : 0 }, gnd);
+      v.drainEvents();
+      assert.ok(Number.isFinite(v.x) && Number.isFinite(v.y), 'car state finite');
+      if (!v.onGround) air += 1 / 120;
+      if (n.index >= 0 && Math.abs(n.lateral) > road.halfTotal + 1) off += 1 / 120;
+      bump = Math.max(bump, Math.abs(v.vy - vy0) * 120);
+      top = Math.max(top, v.speed);
+    }
+    const done = dir > 0 ? s > road.length - 60 : s < 60;
+    console.log(`${road.name} ${dir > 0 ? 'hin' : 'zurück'}: ${done ? 'durch' : `stecken bei ${s.toFixed(0)} m`}, top ${(top * 3.6).toFixed(0)} km/h, air ${air.toFixed(2)} s, off-road ${off.toFixed(1)} s`);
+    assert.ok(done, `${road.id} drivable ${dir > 0 ? 'forwards' : 'backwards'}`);
+    assert.ok(air < 1, `${road.id}: no jumps (${air.toFixed(2)} s airborne)`);
+    assert.ok(off < 3, `${road.id}: autopilot stays on the road`);
+  }
+}
+console.log('branch road checks passed');
+
+// --- GPS routing over the road network
+const graph = new RoadGraph(world);
+const pass = world.landmarks.find((l) => l.id === 'lm-pass');
+const fest = world.festival;
+for (const [name, a, b] of [
+  ['start -> pass', [tr.x[tr.startIndex], tr.z[tr.startIndex]], [pass.x, pass.z]],
+  ['festival -> lighthouse', [fest.x, fest.z], [world.lighthouse.x, world.lighthouse.z]],
+  ['gravel -> city', [world.branches[2].x[400], world.branches[2].z[400]], [-700, -600]],
+]) {
+  const r = graph.route(a[0], a[1], b[0], b[1]);
+  const straight = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  console.log(`route ${name}: ${(r.length / 1000).toFixed(2)} km over ${r.points.length} points (straight ${(straight / 1000).toFixed(2)} km)`);
+  assert.ok(r.points.length > 10 && r.length >= straight * 0.99 && r.length < straight * 4, `${name}: plausible route`);
+  // Consecutive route points are close together (it follows the roads).
+  for (let i = 1; i < r.points.length; i++) {
+    const d = Math.hypot(r.points[i][0] - r.points[i - 1][0], r.points[i][1] - r.points[i - 1][1]);
+    assert.ok(d < 60 || i === 1 || i === r.points.length - 1, `${name}: gap of ${d.toFixed(0)} m in the route`);
+  }
+}
+// Discovered roads survive a save/load round trip.
+const disc = new RoadDiscovery(world);
+disc.visit(tr.x[100], tr.z[100], 40);
+disc.visit(pass.x, pass.z, 40);
+const reloaded = new RoadDiscovery(world, disc.save());
+assert.ok(disc.count > 3 && reloaded.count === disc.count, 'road discovery round trip');
+console.log('navigation checks passed');
+
+// --- Career levels and skill chains
+assert.equal(levelForXp(0), 1);
+assert.equal(levelForXp(xpForLevel(2)), 2);
+assert.equal(levelForXp(xpForLevel(5) - 1), 4);
+const career = new Career();
+const ups = career.award(xpForLevel(3) + 10, 'test');
+assert.deepEqual(ups, [2, 3]);
+let banked = 0;
+let broken = 0;
+const chain = new SkillChain({ onBank: (t) => (banked = t), onBreak: (t) => (broken = t) });
+const drifter = { x: 0, z: 0, yaw: 0, speed: 30, onGround: true };
+for (let i = 0; i < 60; i++) chain.update(1 / 60, drifter, [], 20); // one second of drifting
+assert.ok(chain.active && chain.points > 1000, 'drift feeds the chain');
+drifter.onGround = false;
+for (let i = 0; i < 60; i++) chain.update(1 / 60, drifter, [], 0); // one second in the air
+drifter.onGround = true;
+chain.update(1 / 60, drifter, [], 0);
+assert.ok(chain.mult >= 2, 'a second skill raises the multiplier');
+for (let i = 0; i < 60 * 4; i++) chain.update(1 / 60, drifter, [], 0);
+assert.ok(banked > 0 && !chain.active, 'quiet chain gets banked');
+for (let i = 0; i < 30; i++) chain.update(1 / 60, drifter, [], 20);
+chain.crash();
+assert.ok(broken > 0 && !chain.active, 'a crash breaks the chain');
+console.log('career and skill checks passed');

@@ -1,7 +1,7 @@
 // Open-world activity layout (pure data): checkpoint runs, drift zones, speed traps and jump ramps.
 // Planned after the terrain and city exist, before vegetation, so trails and landing zones stay clear.
 
-import { CITY, ROAD, WORLD } from './config.js';
+import { CITY, ROAD, WORLD, FESTIVAL, MOUNTAIN } from './config.js';
 import { clamp } from './util.js';
 
 const TWO_PI = Math.PI * 2;
@@ -169,6 +169,38 @@ export function planActivities(world) {
   }
   routes.push({ id: 'run-lake', name: 'Seeufer-Sprint', blurb: 'Am Südufer entlang und runter an den Strand', points: lake, goldSpeed: 30 });
 
+  // Runs on the branch roads: the touge up and down, the lake road and the gravel road.
+  const branch = (id) => (world.branches || []).find((b) => b.id === id);
+  const along = (road, s0, s1, step) => {
+    const pts = [];
+    const n = Math.max(2, Math.round(Math.abs(s1 - s0) / step));
+    for (let k = 0; k <= n; k++) {
+      const p = road.pointAt(s0 + ((s1 - s0) * k) / n, 0, {});
+      pts.push({ x: p.x, z: p.z, road: true });
+    }
+    // Medal times use the distance along the road, not the straight lines between the gates.
+    pts.pathLength = Math.abs(s1 - s0);
+    return pts;
+  };
+  const touge = branch('touge');
+  if (touge) {
+    let pass = 0;
+    let bd = Infinity;
+    for (let i = 0; i < touge.count; i++) {
+      const d = Math.hypot(touge.x[i] - MOUNTAIN.passPoint[0], touge.z[i] - MOUNTAIN.passPoint[1]);
+      if (d < bd) {
+        bd = d;
+        pass = i * touge.spacing;
+      }
+    }
+    routes.push({ id: 'run-touge-up', name: 'Kaminari bergauf', blurb: 'Durch die Kehren hinauf zum roten Tor', points: along(touge, 45, pass - 20, 140), goldSpeed: 18 });
+    routes.push({ id: 'run-touge-down', name: 'Kaminari bergab', blurb: 'Vom Pass hinunter zum Festival, Kehre um Kehre', points: along(touge, pass + 40, touge.length - 30, 140), goldSpeed: 18.5 });
+  }
+  const lakeRoad = branch('lake');
+  if (lakeRoad) routes.push({ id: 'run-lake-road', name: 'Seestraße', blurb: 'Vom Ostufer an den Kirschbäumen vorbei zum Festival', points: along(lakeRoad, lakeRoad.length - 40, 420, 190), goldSpeed: 34 });
+  const gravel = branch('gravel');
+  if (gravel) routes.push({ id: 'run-gravel', name: 'Südwald-Rallye', blurb: 'Schotter, Kuppen und lange Bögen durch den Südwald', points: along(gravel, 40, gravel.length - 40, 170), goldSpeed: 25 });
+
   for (const r of routes) {
     let len = 0;
     for (let i = 1; i < r.points.length; i++) {
@@ -177,7 +209,8 @@ export function planActivities(world) {
       len += Math.hypot(b.x - a.x, b.z - a.z);
       if (!(a.road && b.road)) clear.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z, r: 11, trail: true });
     }
-    r.length = len;
+    r.length = r.points.pathLength || len;
+    len = r.length;
     // Medal times in seconds: gold, silver, bronze.
     const gold = Math.round(len / r.goldSpeed);
     r.medals = [gold, Math.round(gold * 1.2), Math.round(gold * 1.45)];
@@ -279,6 +312,7 @@ export function planActivities(world) {
       const roadDist = base.index >= 0 ? base.dist : 999;
       if (roadDist < 35 || roadDist > 220) continue;
       if (Math.hypot(gx - CITY.x, gz - CITY.z) < CITY.radius + 60) continue;
+      if (Math.hypot(gx - FESTIVAL.x, gz - FESTIVAL.z) < FESTIVAL.radius + 200) continue;
       for (let k = 0; k < 8; k++) {
         const yaw = (k / 8) * TWO_PI;
         const fx = Math.sin(yaw);
@@ -298,6 +332,7 @@ export function planActivities(world) {
             const sz = z - fx * side;
             const nb = tr.nearest(sx, sz, -1, q, 2);
             if (nb.index >= 0 && nb.dist < ROAD.halfTotal + 8) ok = false;
+            if (world.branchDistance(sx, sz, 10) < 8) ok = false;
             if (Math.abs(hf.get(sx, sz) - h) > 1.2) ok = false;
           }
           if (d > 0) drop += prev - h;
@@ -321,6 +356,43 @@ export function planActivities(world) {
   });
   world.ramps = ramps;
   world.routes = routes;
+
+  // ---------------------------------------------------------------- speed zones
+  // Average speed through a marked stretch: the straightest part of a road without other events.
+  const zones2 = [];
+  const zonePlan = [
+    { road: lakeRoad, name: 'Tempozone Seestraße', length: 380, goals: [150, 180, 210] },
+    { road: gravel, name: 'Tempozone Schotter', length: 340, goals: [105, 130, 155] },
+    { road: tr, name: null, length: 420, goals: [165, 195, 225] },
+  ];
+  for (const zp of zonePlan) {
+    const road = zp.road;
+    if (!road) continue;
+    const n2 = road.count;
+    const span = Math.round(zp.length / road.spacing);
+    let best = null;
+    const busy = (s) => {
+      if (road !== tr) return false;
+      if (world.driftZones.some((z) => tr.wrapS(s - z.s0) < z.length + 150 || tr.wrapS(z.s0 - s) < zp.length + 150)) return true;
+      if (world.speedTraps.some((t) => Math.abs(((s - t.s + tr.length * 1.5) % tr.length) - tr.length / 2) < zp.length + 200)) return true;
+      const rs = tr.wrapS(s - tr.startS);
+      return rs < 400 || rs > tr.length - 400;
+    };
+    const last = road.closed ? n2 : n2 - span - 40;
+    for (let i = road.closed ? 0 : 40; i < last; i += 10) {
+      let k = 0;
+      for (let j = 0; j <= span; j += 5) k = Math.max(k, Math.abs(road.curv[road.closed ? (i + j) % n2 : i + j]));
+      const s0 = i * road.spacing;
+      if (busy(s0)) continue;
+      if (!best || k < best.k) best = { k, s0 };
+    }
+    if (!best) continue;
+    const a = road.pointAt(best.s0, 0, {});
+    const b = road.pointAt(best.s0 + zp.length, 0, {});
+    const name = zp.name || `Tempozone ${placeName(a.x, a.z)}`;
+    zones2.push({ id: `zone-${zones2.length}`, name, roadId: road.id || 'circuit', s0: best.s0, length: zp.length, goals: zp.goals, x: a.x, z: a.z, ex: b.x, ez: b.z });
+  }
+  world.speedZones = zones2;
   return world;
 }
 

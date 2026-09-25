@@ -19,6 +19,12 @@ import { CameraRig, CAMERA_LABELS, CAMERA_MODES } from './camera.js';
 import { StaticColliders } from './collision.js';
 import { carPaintTexture } from './textures.js';
 import { OpenWorld } from './openworld.js';
+import { Career } from './career.js';
+import { SkillChain } from './skills.js';
+import { Gps } from './gps.js';
+import { WorldMap } from './worldmap.js';
+import { PhotoMode } from './photo.js';
+import { renderTerrainRaster, roadPolylines } from './maprender.js';
 import { clamp, formatTime } from './util.js';
 
 const PAINTS = [
@@ -28,6 +34,13 @@ const PAINTS = [
   { name: 'Signalorange', color: '#ee6a1c', stripe: '#15171b' },
   { name: 'Britisch Grün', color: '#15452f', stripe: '#e8dcb5' },
   { name: 'Graphit', color: '#30343b', stripe: '#f2a541' },
+  // Unlocked with the driver level in the open world.
+  { name: 'Sakura-Pink', color: '#f29bbf', stripe: '#ffffff', level: 2 },
+  { name: 'Mitternachtslila', color: '#3b1f6b', stripe: '#29e3ff', level: 3 },
+  { name: 'Neongrün', color: '#58d43a', stripe: '#111111', level: 4 },
+  { name: 'Kaminari-Gelb', color: '#f2c230', stripe: '#1a1a1a', level: 6 },
+  { name: 'Chromsilber', color: '#b9c0c7', stripe: '#c1121f', level: 8 },
+  { name: 'Festival-Gold', color: '#c9a227', stripe: '#111111', level: 10 },
 ];
 
 const RIVALS = [
@@ -113,6 +126,8 @@ class Game {
   constructor() {
     this.settings = loadSettings();
     if (!QUALITY[this.settings.quality]) this.settings.quality = DEFAULTS.quality;
+    this.career = new Career();
+    if (!this.#paintUnlocked(this.settings.paint)) this.settings.paint = 0;
     this.state = 'loading';
     this.mode = 'race';
     this.bestLap = loadBest();
@@ -149,7 +164,7 @@ class Game {
   async boot() {
     const fill = document.getElementById('load-fill');
     const text = document.getElementById('load-text');
-    const steps = 16;
+    const steps = 18;
     let done = 0;
     const step = async (label, fn) => {
       text.textContent = label + ' …';
@@ -176,13 +191,22 @@ class Game {
       }
     });
     this.data = new WorldData();
-    await step('Strecke wird vermessen', () => this.data.buildTrack());
-    await step('Gelände wird geformt', () => this.data.buildTerrain());
+    await step('Straßen werden vermessen', () => {
+      this.data.buildTrack();
+      this.data.buildRoads();
+    });
+    await step('Gelände wird geformt', () => {
+      this.data.buildTerrain();
+      this.data.placeGuardRails();
+    });
     await step('Stadt wird geplant', () => {
       this.data.placeCity();
       this.data.placeLamps();
     });
-    await step('Open World wird geplant', () => this.data.planActivities());
+    await step('Open World wird geplant', () => {
+      this.data.planActivities();
+      this.data.planLandmarks();
+    });
     await step('Wald wird gepflanzt', () => {
       this.data.placeVegetation();
       this.data.placeBillboards();
@@ -199,17 +223,36 @@ class Game {
       this.world.buildWater();
       this.world.buildBackdrop();
     });
+    await step('Festival und Sehenswürdigkeiten', () => this.world.buildScenery());
     await step('Autos', () => this.#createCars());
     await step('Checkpoints, Zonen, Schanzen', () => {
       this.openWorld = new OpenWorld(this);
       this.openWorld.build();
+    });
+    let mapRaster = null;
+    let mapLines = null;
+    await step('Karte wird gezeichnet', () => {
+      mapRaster = renderTerrainRaster(this.data, this.settings.quality === 'low' ? 1024 : 2048);
+      mapLines = roadPolylines(this.data);
     });
     await step('Tageszeit', () => this.world.setTimeOfDay(this.settings.time));
     this.effects = new Effects(this.scene);
     this.audio = new GameAudio();
     this.audio.muted = this.settings.muted;
     this.input = new Input();
-    this.hud = new Hud(document.getElementById('hud'), this.data);
+    this.hud = new Hud(document.getElementById('hud'), this.data, { raster: mapRaster, lines: mapLines });
+    this.gps = new Gps(this);
+    this.worldMap = new WorldMap(this, mapRaster, mapLines);
+    this.photo = new PhotoMode(this);
+    this.skills = new SkillChain({
+      onBank: (total) => {
+        this.hud.skillResult(total, true);
+        if (total > this.career.bestChain) this.career.bestChain = total;
+        this.career.award(Math.round(total * 0.2), 'Skill-Kette');
+      },
+      onBreak: (lost) => this.hud.skillResult(lost, false),
+    });
+    this.career.onAward(({ xp, reason, levelUps }) => this.#onAward(xp, reason, levelUps));
     this.rig = new CameraRig(this.camera);
     this.rig.setMode(CAMERA_MODES.includes(this.settings.camera) ? this.settings.camera : 'chase');
     this.#setupPost();
@@ -416,24 +459,8 @@ class Game {
     });
     syncSeg();
 
-    // Paint swatches
-    const sw = $('swatches');
-    PAINTS.forEach((p, i) => {
-      const b = document.createElement('button');
-      b.className = 'swatch';
-      b.style.background = `linear-gradient(135deg, ${p.color} 60%, ${p.stripe} 60%)`;
-      b.title = p.name;
-      b.setAttribute('aria-label', p.name);
-      b.setAttribute('aria-pressed', String(i === this.settings.paint));
-      b.addEventListener('click', () => {
-        this.settings.paint = i;
-        storeSettings(this.settings);
-        sw.querySelectorAll('.swatch').forEach((s, k) => s.setAttribute('aria-pressed', String(k === i)));
-        this.setPaint(i);
-        this.audio.click();
-      });
-      sw.appendChild(b);
-    });
+    // Paint swatches (the last ones unlock with the driver level)
+    this.#buildSwatches();
 
     $('start-btn').addEventListener('click', () => this.start());
     $('resume-btn').addEventListener('click', () => this.resume());
@@ -468,6 +495,7 @@ class Game {
     $('btn-camera').addEventListener('click', () => this.#cycleCamera());
     $('btn-pause').addEventListener('click', () => this.pause());
     $('btn-map').addEventListener('click', () => this.input.taps.add('map'));
+    $('photo-btn').addEventListener('click', () => this.openPhoto());
     $('abort-btn').addEventListener('click', () => {
       this.openWorld.cancelRun();
       this.resume();
@@ -481,6 +509,52 @@ class Game {
       document.body.classList.add('touch');
       $('keys-help').hidden = true;
     }
+  }
+
+  #paintUnlocked(i) {
+    const p = PAINTS[i];
+    return !!p && (!p.level || this.career.level >= p.level);
+  }
+
+  #buildSwatches() {
+    const sw = document.getElementById('swatches');
+    sw.textContent = '';
+    PAINTS.forEach((p, i) => {
+      const b = document.createElement('button');
+      const open = this.#paintUnlocked(i);
+      b.className = 'swatch';
+      b.style.background = `linear-gradient(135deg, ${p.color} 60%, ${p.stripe} 60%)`;
+      b.title = open ? p.name : `${p.name} · ab Stufe ${p.level}`;
+      b.setAttribute('aria-label', b.title);
+      b.setAttribute('aria-pressed', String(i === this.settings.paint));
+      if (!open) {
+        b.classList.add('locked');
+        b.dataset.level = String(p.level);
+      }
+      b.addEventListener('click', () => {
+        if (!this.#paintUnlocked(i)) {
+          this.audio.click();
+          return;
+        }
+        this.settings.paint = i;
+        storeSettings(this.settings);
+        sw.querySelectorAll('.swatch').forEach((s, k) => s.setAttribute('aria-pressed', String(k === i)));
+        this.setPaint(i);
+        this.audio.click();
+      });
+      sw.appendChild(b);
+    });
+  }
+
+  // XP notices, level-ups and paint unlocks.
+  #onAward(xp, reason, levelUps) {
+    if (xp > 0 && reason) this.hud.feed(reason, xp);
+    for (const level of levelUps) {
+      const paint = PAINTS.find((p) => p.level === level);
+      this.hud.banner('Stufe erreicht', `Stufe ${level}`, paint ? `Neue Lackierung: ${paint.name}` : 'Weiter so!', 3.6);
+      this.audio.chime();
+    }
+    if (levelUps.length) this.#buildSwatches();
   }
 
   #refreshBest() {
@@ -580,7 +654,11 @@ class Game {
     if (mode === 'race') {
       const slot = this.#gridSlot(PLAYER_SLOT);
       this.#placeVehicle(slot.s, slot.lateral);
-    } else this.#placeVehicle(this.data.track.startS - 14, mode === 'free' ? -3 : 0);
+    } else if (mode === 'free' && this.data.festival) {
+      // Open world starts at the festival.
+      const f = this.data.festival.spawn;
+      this.placeCar(f.x, f.z, f.heading);
+    } else this.#placeVehicle(this.data.track.startS - 14, 0);
     this.ai = [];
     this.rivalModels.forEach((m, i) => {
       const drv = new AIDriver(this.data.track, this.data, { name: RIVALS[i].name, color: RIVALS[i].color });
@@ -612,9 +690,10 @@ class Game {
     this.audio?.silence();
     this.#applyLights();
     this.openWorld?.setEnabled(false);
-    document.getElementById('worldmap').hidden = true;
+    this.worldMap?.hide();
+    this.gps?.clear();
     const t = this.openWorld?.totals();
-    if (t) document.getElementById('stars-tag').textContent = `★ ${t.stars}/${t.max}`;
+    if (t) document.getElementById('stars-tag').textContent = `★ ${t.stars}/${t.max} · Stufe ${this.career.level}`;
   }
 
   start() {
@@ -670,7 +749,8 @@ class Game {
       this.#placeVehicle(tr.startS - 14, 0);
       this.rivalModels.forEach((m) => (m.root.visible = false));
     } else {
-      this.#placeVehicle(tr.startS - 14, -3);
+      const f = this.data.festival.spawn;
+      this.placeCar(f.x, f.z, f.heading);
       // Light traffic in both directions.
       const plan = [
         [600, 1],
@@ -711,13 +791,18 @@ class Game {
     this.vehicle.gear = this.mode === 'free' ? 1 : 0;
     this.openWorld.setEnabled(this.mode === 'free');
     document.getElementById('btn-map').hidden = this.mode !== 'free';
-    document.getElementById('worldmap').hidden = true;
+    this.worldMap.hide();
+    this.gps.clear();
+    this.skills.reset();
+    this.hud.setLevel(this.career.levelProgress());
+    this.levelShown = this.career.xp;
     this.#applyLights();
     if (this.mode === 'free') {
       this.state = 'running';
       this.race.started = true;
       this.world.setStartLights('off');
-      this.hud.message('Freie Fahrt', 1.6, 'info');
+      this.hud.banner('Willkommen beim', 'Nordkamm Festival', `Stufe ${this.career.level} · M öffnet die Karte`, 3.4);
+      this.career.discover('lm-festival');
     } else {
       this.state = 'countdown';
       this.world.setStartLights(0);
@@ -727,7 +812,106 @@ class Game {
     this.#syncPauseLabels();
   }
 
+  // ------------------------------------------------------------------ world map and fast travel
+  openMap() {
+    if (this.mode !== 'free' || this.state !== 'running') return;
+    this.prevState = this.state;
+    this.state = 'map';
+    this.audio.silence();
+    this.input.clearTaps();
+    this.worldMap.show();
+  }
+
+  closeMap() {
+    if (this.state !== 'map') return;
+    this.worldMap.hide();
+    this.state = 'running';
+    this.input.clearTaps();
+    this.last = performance.now();
+    this.acc = 0;
+  }
+
+  canFastTravel(item) {
+    if (this.mode !== 'free') return { ok: false, reason: 'Nur in der Open World' };
+    if (this.openWorld.runActive) return { ok: false, reason: 'Nicht während eines Laufs' };
+    if (item.kind === 'festival') return { ok: true };
+    if (item.kind === 'board') return { ok: false, reason: 'Bonusschilder findest du nur auf eigene Faust' };
+    const allBoards = this.career.boards.size >= this.data.bonusBoards.length;
+    if (item.spot) return allBoards ? { ok: true } : { ok: false, reason: 'Schnellreise an jeden Ort: alle Bonusschilder zerstören' };
+    if (this.career.found.has(item.id) || allBoards) return { ok: true };
+    return { ok: false, reason: 'Schnellreise erst, wenn du einmal dort warst' };
+  }
+
+  // Fade out, put the car on the nearest road next to the target, fade in.
+  fastTravel(item) {
+    let pose = item.travel;
+    if (!pose || pose.onRoad) {
+      const p = this.gps.graph.project(pose ? pose.x : item.x, pose ? pose.z : item.z, 250);
+      if (p) {
+        const r = p.road.pointAt(p.s, 0, {});
+        const fwd = pose ? Math.cos(r.heading - pose.heading) >= 0 : true;
+        pose = { x: r.x, z: r.z, heading: fwd ? r.heading : r.heading + Math.PI };
+      } else if (this.data.heightfield.get(item.x, item.z) > 1.5) pose = { x: item.x, z: item.z, heading: 0 };
+      else {
+        this.hud.message('Dort ist kein Land', 1.4, 'warn');
+        return;
+      }
+    }
+    this.closeMap();
+    this.openWorld.cancelRun(true);
+    this.skills.reset();
+    this.drift.active = false;
+    this.drift.points = 0;
+    const fade = document.getElementById('fade');
+    fade.hidden = false;
+    void fade.offsetWidth;
+    fade.classList.add('on');
+    this.state = 'paused';
+    this.prevState = 'running';
+    setTimeout(() => {
+      this.placeCar(pose.x, pose.z, pose.heading);
+      this.vehicle.gear = 1;
+      this.rig.initialised = false;
+      this.state = 'running';
+      this.last = performance.now();
+      this.acc = 0;
+      fade.classList.remove('on');
+      setTimeout(() => (fade.hidden = true), 400);
+      this.hud.message(item.name, 1.6, 'info');
+    }, 380);
+  }
+
+  // Photo mode: pause the game and hand the camera to the orbit controls.
+  openPhoto() {
+    if (this.state === 'paused') this.#hidePause();
+    else if (this.state === 'running' || this.state === 'countdown') this.prevState = this.state;
+    else return;
+    this.state = 'photo';
+    this.audio.silence();
+    this.input.clearTaps();
+    this.photo.open();
+  }
+
+  closePhoto() {
+    if (this.state !== 'photo') return;
+    this.photo.close();
+    this.rig.initialised = false;
+    this.state = this.prevState || 'running';
+    this.input.clearTaps();
+    this.last = performance.now();
+    this.acc = 0;
+  }
+
+  onBoardSmashed(board) {
+    const n = this.career.boards.size;
+    const total = this.data.bonusBoards.length;
+    this.skills.add('wreck', 400);
+    this.career.award(1000, `Bonusschild ${n}/${total}`);
+    if (n === total) this.hud.banner('Alle Bonusschilder', 'Schnellreise überall', 'Du kannst jetzt an jede Stelle der Karte reisen', 4);
+  }
+
   pause() {
+    if (this.state === 'map') this.closeMap();
     if (this.state !== 'running' && this.state !== 'countdown') return;
     this.prevState = this.state;
     this.state = 'paused';
@@ -949,9 +1133,8 @@ class Game {
     this.audio.crash(strength);
     this.rig.addShake(Math.min(1, strength / 18));
     this.effects.sparkBurst(x, y, z, nx, nz, strength);
-    if (this.drift.active && this.drift.points > 50) {
-      this.hud.message('Drift verloren', 1.2, 'warn');
-    }
+    if (this.mode === 'free' && strength > 4) this.skills.crash();
+    else if (this.drift.active && this.drift.points > 50) this.hud.message('Drift verloren', 1.2, 'warn');
     this.drift.active = false;
     this.drift.points = 0;
     this.drift.timer = 0;
@@ -968,6 +1151,24 @@ class Game {
     const tr = this.data.track;
     let q = tr.nearest(v.x, v.z, this.playerIdx, {});
     if (q.index < 0) q = tr.nearest(v.x, v.z, tr.indexOf(v.x, v.z), {});
+    // In the open world the nearest road may be a branch (touge, lake road, gravel road).
+    if (this.mode === 'free') {
+      let best = null;
+      for (const road of this.data.branches) {
+        const b = road.nearest(v.x, v.z, -1, {}, 8);
+        if (b.index >= 0 && (!best || b.dist < best.q.dist)) best = { road, q: b };
+      }
+      if (best && (q.index < 0 || best.q.dist < q.dist)) {
+        const { road, q: b } = best;
+        // Keep the direction of travel along the road.
+        const fwd = Math.sin(v.yaw) * b.tx + Math.cos(v.yaw) * b.tz >= 0;
+        const s = clamp(b.s, 12, road.length - 12);
+        const p = road.pointAt(s, clamp(b.lateral, -2, 2), {});
+        this.placeCar(p.x, p.z, fwd ? p.heading : p.heading + Math.PI);
+        this.hud.message('Zurück auf die Straße', 1, 'info');
+        return;
+      }
+    }
     const s = q.index >= 0 ? q.s : tr.startS;
     const lateral = q.index >= 0 ? clamp(q.lateral, -3, 3) : 0;
     this.#placeVehicle(s, lateral);
@@ -1143,17 +1344,18 @@ class Game {
     const v = this.vehicle;
     const d = this.drift;
     const ang = Math.abs(v.driftAngle) * 57.3;
+    d.delta = 0;
     if (v.onGround && v.speed > 9 && ang > 12 && ang < 110 && this.respawnTimer <= 0) {
       d.active = true;
       d.timer += dt;
       d.idle = 0;
       d.mult = Math.min(5, 1 + Math.floor(d.timer / 2));
-      d.points += ang * v.speed * dt * 0.6 * d.mult;
+      d.delta = ang * v.speed * dt * 0.6 * d.mult;
+      d.points += d.delta;
     } else if (d.active) {
       d.idle += dt;
       if (d.idle > 0.8) {
         d.total += d.points;
-        if (d.points > 250) this.hud.message(`+${Math.round(d.points).toLocaleString('de-DE')}`, 1.3, 'info');
         d.active = false;
         d.points = 0;
         d.timer = 0;
@@ -1165,6 +1367,20 @@ class Game {
   // ------------------------------------------------------------------ taps and per-frame UI
   #handleTaps() {
     const inp = this.input;
+    if (this.state === 'map') {
+      // Map open: M, Esc/Start and B close it, everything else belongs to the map.
+      if (inp.consume('map') || inp.consume('pause') || inp.consume('reset')) this.closeMap();
+      return;
+    }
+    if (this.state === 'photo') {
+      if (inp.consume('photo') || inp.consume('pause') || inp.consume('reset')) this.closePhoto();
+      inp.clearTaps();
+      return;
+    }
+    if (inp.consume('photo')) {
+      this.openPhoto();
+      return;
+    }
     if (inp.consume('pause')) {
       if (this.state === 'paused') this.resume();
       else if (this.state === 'running' || this.state === 'countdown') this.pause();
@@ -1180,10 +1396,8 @@ class Game {
       this.#toast(`Licht ${this.#headlightsOn() ? 'an' : 'aus'}`);
     }
     if (inp.consume('map')) {
-      if (this.mode === 'free') {
-        const map = document.getElementById('worldmap');
-        map.hidden = !map.hidden;
-      } else this.hud.bigMap = !this.hud.bigMap;
+      if (this.mode === 'free') this.openMap();
+      else this.hud.bigMap = !this.hud.bigMap;
     }
     if (inp.consume('reset') && this.state === 'running' && this.respawnTimer <= 0) this.#respawn();
   }
@@ -1229,9 +1443,15 @@ class Game {
     if (this.frameCount % 2 === 0) {
       const cars = this.ai.map((a) => ({ x: a.x, z: a.z, color: a.color }));
       const markers = this.openWorld.enabled ? this.openWorld.markers() : [];
-      this.hud.drawMinimap(v, cars, markers);
-      const map = document.getElementById('worldmap');
-      if (!map.hidden && this.frameCount % 4 === 0) this.hud.drawWorldMap(map, v, cars, markers, this.openWorld.totals());
+      if (this.gps.active) markers.push({ kind: 'waypoint', x: this.gps.target.x, z: this.gps.target.z, target: true });
+      this.hud.drawMinimap(v, cars, markers, this.gps.active && this.gps.route ? this.gps.route.points : null, dt * 2);
+    }
+    if (this.mode === 'free') {
+      this.hud.showSkills(this.skills, 3.2);
+      if (this.levelShown !== this.career.xp) {
+        this.levelShown = this.career.xp;
+        this.hud.setLevel(this.career.levelProgress());
+      }
     }
     const race = this.race;
     if (race) {
@@ -1246,9 +1466,6 @@ class Game {
         laps: race.laps,
         lapTime: this.state === 'finished' ? me.lastLap : lapTime,
         bestLap: this.mode === 'time' ? this.bestLap : me.bestLap,
-        driftTotal: this.drift.total,
-        driftCurrent: this.drift.active ? this.drift.points : 0,
-        driftMult: this.drift.mult,
       });
     }
     this.hud.update(dt);
@@ -1270,15 +1487,33 @@ class Game {
     this.last = now;
     this.tick(dt);
     const v = this.vehicle;
+    // Test hook: a fixed camera (position, target) for automated overview screenshots.
+    if (this.debugCamera) {
+      const c = this.debugCamera;
+      this.camera.position.set(c.pos[0], c.pos[1], c.pos[2]);
+      this.camera.lookAt(c.look[0], c.look[1], c.look[2]);
+      this.camera.fov = c.fov || 55;
+      this.camera.far = 9000;
+      this.camera.updateProjectionMatrix();
+    }
     this.world.setShadowFocus(this.state === 'menu' ? v : { x: v.x + Math.sin(v.yaw) * 20, y: v.y, z: v.z + Math.cos(v.yaw) * 20 });
     this.world.update(dt, this.camera);
     if (this.speedPass) {
       const s = this.state === 'running' && QUALITY[this.settings.quality].speedBlur && this.rig.mode !== 'cockpit' ? clamp((v.speed - 38) / 45, 0, 1) * 0.9 : 0;
       this.speedPass.uniforms.uStrength.value = s;
     }
+    // The world map covers the whole screen: no need to render the 3D scene behind it.
+    if (this.state !== 'map') this.renderFrame(dt);
+    this.#adaptResolution(dt);
+  }
+
+  renderFrame(dt = 0.016) {
+    if (this.state === 'photo') {
+      this.photo.apply(this.camera);
+      if (this.speedPass) this.speedPass.uniforms.uStrength.value = 0;
+    }
     if (this.composer) this.composer.render(dt);
     else this.renderer.render(this.scene, this.camera);
-    this.#adaptResolution(dt);
   }
 
   // Advance the game without rendering (used by automated tests to fast-forward).
@@ -1291,6 +1526,11 @@ class Game {
     this.input.poll();
     this.#handleTaps();
     const v = this.vehicle;
+    if (this.state === 'map') {
+      this.worldMap.gamepad(dt, this.input);
+      return;
+    }
+    if (this.state === 'photo') return;
 
     if (this.state === 'menu') {
       this.rig.update(dt, v, this.cameraGround, { menu: true });
@@ -1301,6 +1541,9 @@ class Game {
       if (this.mode === 'free') {
         this.#updateDrift(dt);
         this.openWorld.update(dt, v, this.playerQ);
+        const traffic = this.ai.map((a) => ({ x: a.x, z: a.z, yaw: a.yaw, speed: a.speed }));
+        this.skills.update(dt, v, traffic, this.drift.delta || 0, this.state === 'running' && !this.openWorld.holding && this.respawnTimer <= 0);
+        this.gps.update(dt, v, true);
       }
       this.playerModel.update(v);
       const braking = v.gear > 0 ? v.brake : v.gear < 0 ? v.throttle : 0;

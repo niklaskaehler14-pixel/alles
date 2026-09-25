@@ -14,6 +14,17 @@ export class PhotoMode {
     this.height = 0.8;
     this.pointers = new Map();
     this.$ = (id) => document.getElementById(id);
+    // Inside the claude.ai viewer files are saved through the downloads capability; everywhere
+    // else the plain download link does the job.
+    this.downloads = null;
+    try {
+      window.claude
+        ?.use?.('downloads')
+        .then((d) => (this.downloads = d))
+        .catch(() => {});
+    } catch {
+      /* not hosted */
+    }
     this.#bind();
   }
 
@@ -117,10 +128,27 @@ export class PhotoMode {
       const link = this.$('photo-save');
       link.href = url;
       link.download = `nordkamm-foto-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`;
+      this.$('photo-note').textContent = 'Klappt das Speichern nicht, halte das Bild gedrückt oder nutze die rechte Maustaste.';
       this.$('photo-shot').hidden = false;
       this.game.audio.shutter();
     });
     this.$('photo-shot-close').addEventListener('click', () => (this.$('photo-shot').hidden = true));
+    this.$('photo-save').addEventListener('click', (e) => {
+      if (!this.downloads) return; // default link download
+      e.preventDefault();
+      const link = this.$('photo-save');
+      const bytes = atob(link.href.split(',')[1] || '');
+      const data = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) data[i] = bytes.charCodeAt(i);
+      const note = this.$('photo-note');
+      this.downloads
+        .save({ filename: link.download || 'nordkamm-foto.jpg', data: new Blob([data], { type: 'image/jpeg' }) })
+        .then(() => (note.textContent = 'Foto gespeichert.'))
+        .catch((err) => {
+          if (err && err.code === 'declined') return;
+          note.textContent = 'Speichern ist hier nicht möglich. Halte das Bild gedrückt oder nutze die rechte Maustaste.';
+        });
+    });
   }
 
   #spread() {

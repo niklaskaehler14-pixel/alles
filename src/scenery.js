@@ -257,27 +257,43 @@ export class Scenery {
       wb.add(beamGeometry(new THREE.Vector3(Math.cos(a) * R, Math.sin(a) * R, -1.7), new THREE.Vector3(Math.cos(a) * R, Math.sin(a) * R, 1.7), 0.14, 5), steel);
     }
     wb.build(rot, { castShadow: this.shadows });
-    // Gondolas stay upright while the wheel turns.
+    // Gondolas stay upright while the wheel turns: two instanced meshes (cabins, roofs) whose
+    // matrices follow the rim every frame.
     const colors = ['#ff3fa4', '#29e3ff', '#f2a541', '#7dff6a', '#b36bff', '#ffffff'];
     const cabinGeo = new THREE.BoxGeometry(2.1, 2.1, 2.3);
+    cabinGeo.translate(0, -1.9, 0);
     const roofGeo = new THREE.CylinderGeometry(0.2, 1.3, 0.5, 4);
     roofGeo.rotateY(Math.PI / 4);
-    this.gondolas = [];
-    for (let k = 0; k < spokes; k++) {
-      const a = (k / spokes) * Math.PI * 2;
-      const pivot = new THREE.Group();
-      pivot.position.set(Math.cos(a) * R, Math.sin(a) * R, 0);
-      const mat = new THREE.MeshStandardMaterial({ color: colors[k % colors.length], roughness: 0.45, metalness: 0.2 });
-      const cabin = new THREE.Mesh(cabinGeo, mat);
-      cabin.position.y = -1.9;
-      const roof = new THREE.Mesh(roofGeo, dark);
-      roof.position.y = -0.6;
-      pivot.add(cabin, roof);
-      cabin.castShadow = this.shadows;
-      rot.add(pivot);
-      this.gondolas.push(pivot);
-    }
+    roofGeo.translate(0, -0.6, 0);
+    const cabins = new THREE.InstancedMesh(cabinGeo, new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.2 }), spokes);
+    const roofs = new THREE.InstancedMesh(roofGeo, dark, spokes);
+    const c = new THREE.Color();
+    for (let k = 0; k < spokes; k++) cabins.setColorAt(k, c.set(colors[k % colors.length]));
+    cabins.castShadow = this.shadows;
+    group.add(cabins, roofs);
+    this.gondolas = { cabins, roofs, count: spokes, radius: R, hub, m: new THREE.Matrix4() };
     this.wheel = rot;
+    this.#placeGondolas();
+  }
+
+  #placeGondolas() {
+    const G = this.gondolas;
+    const th = this.wheel.rotation.z;
+    for (let k = 0; k < G.count; k++) {
+      const a = (k / G.count) * Math.PI * 2 + th;
+      G.m.makeTranslation(Math.cos(a) * G.radius, G.hub + Math.sin(a) * G.radius, 0);
+      G.cabins.setMatrixAt(k, G.m);
+      G.roofs.setMatrixAt(k, G.m);
+    }
+    G.cabins.instanceMatrix.needsUpdate = true;
+    G.roofs.instanceMatrix.needsUpdate = true;
+    // The ring the gondolas move on: one bounding sphere for all of them.
+    if (!G.cabins.boundingSphere) {
+      G.cabins.computeBoundingSphere();
+      G.cabins.boundingSphere.radius = G.radius + 4;
+      G.cabins.boundingSphere.center.set(0, G.hub, 0);
+      G.roofs.boundingSphere = G.cabins.boundingSphere.clone();
+    }
   }
 
   // ------------------------------------------------------------------ torii
@@ -488,14 +504,20 @@ export class Scenery {
     if (this.turntables) for (const t of this.turntables) t.car.setLights({ headlights: night > 0 });
   }
 
-  update(dt) {
+  update(dt, camera) {
     this.time += dt;
+    const cam = camera.position;
     if (this.wheel) {
       this.wheel.rotation.z += dt * 0.045;
-      for (const g of this.gondolas) g.rotation.z = -this.wheel.rotation.z;
+      // Nobody sees the gondolas move from far away.
+      if (Math.hypot(this.data.festival.wheel.x - cam.x, this.data.festival.wheel.z - cam.z) < 900) this.#placeGondolas();
     }
     if (this.turntables) {
       for (const t of this.turntables) {
+        const d = Math.hypot(t.st.x - cam.x, t.st.z - cam.z);
+        t.car.root.visible = d < 700;
+        t.car.setDetail(d < 70);
+        if (d > 700) continue;
         t.st.yaw += dt * t.speed;
         t.car.update(t.st);
       }

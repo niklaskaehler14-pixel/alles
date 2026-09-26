@@ -88,23 +88,64 @@ function colorizeGeometry(geo, hex, jitter = 0.06, rng = Math.random) {
   return geo;
 }
 
-function addSway(material, uniforms, strength = 0.05) {
-  material.onBeforeCompile = (shader) => {
+// Half size of the sun's shadow box around the car (m).
+export const SHADOW_EXTENT = 75;
+
+// Wind sway of the near and middle trees (world position of the instance in tp).
+const TREE_SWAY = `float sway = sin(uTime * 1.3 + tp.x * 0.05 + tp.y * 0.07) + 0.5 * sin(uTime * 2.7 + tp.y * 0.11);
+          float bend = max(0.0, position.y - 2.5);
+          transformed.x += sway * 0.035 * bend;
+          transformed.z += sway * 0.021 * bend;`;
+
+// Tree material for one detail band (0 near, 1 middle, 2 far). Instances outside the band's
+// distance range collapse to a point in the vertex shader, so every tree is drawn exactly once.
+function treeMaterial(uniforms, band) {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
+  m.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uniforms.uTime;
+    shader.uniforms.uLodHi = uniforms.uLodHi;
+    shader.uniforms.uLodMid = uniforms.uLodMid;
+    shader.uniforms.uLodFar = uniforms.uLodFar;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uLodHi;\nuniform float uLodMid;\nuniform float uLodFar;')
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         #ifdef USE_INSTANCING
           vec2 tp = instanceMatrix[3].xz;
-          float sway = sin(uTime * 1.3 + tp.x * 0.05 + tp.y * 0.07) + 0.5 * sin(uTime * 2.7 + tp.y * 0.11);
-          float bend = max(0.0, position.y - 2.5);
-          transformed.x += sway * ${strength.toFixed(3)} * bend;
-          transformed.z += sway * ${(strength * 0.6).toFixed(3)} * bend;
+          float dcam = distance(tp, cameraPosition.xz);
+          ${band === 0 ? 'if (dcam > uLodHi) transformed = vec3(0.0);' : band === 1 ? 'if (dcam <= uLodHi || dcam > uLodMid) transformed = vec3(0.0);' : 'if (dcam <= uLodMid || dcam > uLodFar) transformed = vec3(0.0);'}
+          ${band === 2 ? '' : TREE_SWAY}
         #endif`,
       );
   };
+  m.customProgramCacheKey = () => `tree-band-${band}`;
+  return m;
+}
+
+// Shadow pass of instanced scenery (near trees with their sway, rocks): only instances whose base
+// lies inside the sun's shadow box (plus room for their height) are drawn, the rest collapses to a
+// point. Without it every instance of a mesh that touches the box would be rendered.
+function shadowBoxDepthMaterial(uniforms, sway) {
+  const m = new THREE.MeshDepthMaterial();
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = uniforms.uTime;
+    shader.uniforms.uShadowReach = uniforms.uShadowReach;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uShadowReach;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vec2 tp = instanceMatrix[3].xz;
+          vec4 lp = modelViewMatrix * vec4(instanceMatrix[3].xyz, 1.0);
+          if (abs(lp.x) > uShadowReach || abs(lp.y) > uShadowReach) transformed = vec3(0.0);
+          ${sway ? TREE_SWAY : ''}
+        #endif`,
+      );
+  };
+  m.customProgramCacheKey = () => `shadow-box-${sway ? 'sway' : 'rigid'}`;
+  return m;
 }
 
 export class WorldView {
@@ -114,7 +155,8 @@ export class WorldView {
     this.data = data;
     this.quality = quality;
     this.aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-    this.uniforms = { uTime: { value: 0 } };
+    this.uniforms = { uTime: { value: 0 }, uLodHi: { value: 250 }, uLodMid: { value: 900 }, uLodFar: { value: 3500 }, uShadowReach: { value: SHADOW_EXTENT + 30 } };
+    this.lod = { hi: 250, mid: 900 };
     this.root = new THREE.Group();
     this.root.name = 'world';
     scene.add(this.root);
@@ -211,56 +253,78 @@ export class WorldView {
     };
     this.terrainMaterial = material;
 
-    const CH = 128;
+    // 500 m chunks with four detail levels (every 1st, 2nd, 4th or 8th vertex) chosen by distance.
+    // Each chunk has a skirt hanging below its edges that hides cracks between different levels.
+    const CH = 64;
+    const N = CH + 1;
     const chunks = S / CH;
-    const index = [];
-    for (let z = 0; z < CH; z++) {
-      for (let x = 0; x < CH; x++) {
-        const a = x + z * (CH + 1);
-        const b = a + 1;
-        const c = a + (CH + 1);
-        const e = c + 1;
-        index.push(a, c, b, b, c, e);
+    const SKIRT = 9;
+    const at = (x, z) => x + z * N;
+    const skirt = (edge, i) => N * N + edge * N + i;
+    this.terrainLods = [1, 2, 4, 8].map((step) => {
+      const index = [];
+      for (let z = 0; z < CH; z += step) {
+        for (let x = 0; x < CH; x += step) {
+          const a = at(x, z);
+          const b = at(x + step, z);
+          const c = at(x, z + step);
+          const e = at(x + step, z + step);
+          index.push(a, c, b, b, c, e);
+        }
       }
-    }
+      // Skirts (both windings, they are seen from either side through a crack).
+      const quad = (t0, t1, b1, b0) => index.push(t0, t1, b1, t0, b1, b0, t0, b1, t1, t0, b0, b1);
+      for (let i = 0; i < CH; i += step) {
+        quad(at(i, 0), at(i + step, 0), skirt(0, i + step), skirt(0, i));
+        quad(at(i, CH), at(i + step, CH), skirt(1, i + step), skirt(1, i));
+        quad(at(0, i), at(0, i + step), skirt(2, i + step), skirt(2, i));
+        quad(at(CH, i), at(CH, i + step), skirt(3, i + step), skirt(3, i));
+      }
+      return new THREE.Uint16BufferAttribute(index, 1);
+    });
     const terrain = new THREE.Group();
     terrain.name = 'terrain';
+    this.terrainChunks = [];
     for (let cz = 0; cz < chunks; cz++) {
       for (let cx = 0; cx < chunks; cx++) {
-        const vcount = (CH + 1) * (CH + 1);
+        const vcount = N * N + 4 * N;
         const pos = new Float32Array(vcount * 3);
         const nor = new Float32Array(vcount * 3);
         const col = new Float32Array(vcount * 3);
         const uv = new Float32Array(vcount * 2);
-        let k = 0;
-        for (let z = 0; z <= CH; z++) {
-          for (let x = 0; x <= CH; x++) {
-            const ix = cx * CH + x;
-            const iz = cz * CH + z;
-            const gi = ix + iz * stride;
-            const wx = hf.worldX(ix);
-            const wz = hf.worldZ(iz);
-            pos[k * 3] = wx;
-            pos[k * 3 + 1] = H[gi];
-            pos[k * 3 + 2] = wz;
-            nor.set(normals.subarray(gi * 3, gi * 3 + 3), k * 3);
-            col.set(colors.subarray(gi * 3, gi * 3 + 3), k * 3);
-            uv[k * 2] = wx / 5;
-            uv[k * 2 + 1] = wz / 5;
-            k++;
-          }
+        const put = (k, ix, iz, drop) => {
+          const gi = ix + iz * stride;
+          const wx = hf.worldX(ix);
+          const wz = hf.worldZ(iz);
+          pos[k * 3] = wx;
+          pos[k * 3 + 1] = H[gi] - drop;
+          pos[k * 3 + 2] = wz;
+          nor.set(normals.subarray(gi * 3, gi * 3 + 3), k * 3);
+          col.set(colors.subarray(gi * 3, gi * 3 + 3), k * 3);
+          uv[k * 2] = wx / 5;
+          uv[k * 2 + 1] = wz / 5;
+        };
+        for (let z = 0; z <= CH; z++) for (let x = 0; x <= CH; x++) put(at(x, z), cx * CH + x, cz * CH + z, 0);
+        for (let i = 0; i <= CH; i++) {
+          put(skirt(0, i), cx * CH + i, cz * CH, SKIRT);
+          put(skirt(1, i), cx * CH + i, cz * CH + CH, SKIRT);
+          put(skirt(2, i), cx * CH, cz * CH + i, SKIRT);
+          put(skirt(3, i), cx * CH + CH, cz * CH + i, SKIRT);
         }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
         geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
         geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-        geo.setIndex(index);
+        geo.setIndex(this.terrainLods[0]);
         geo.computeBoundingSphere();
         const mesh = new THREE.Mesh(geo, material);
         mesh.receiveShadow = true;
         mesh.matrixAutoUpdate = false;
         terrain.add(mesh);
+        const x0 = hf.worldX(cx * CH);
+        const z0 = hf.worldZ(cz * CH);
+        this.terrainChunks.push({ mesh, level: 0, box: { minX: x0, maxX: x0 + CH * cell, minZ: z0, maxZ: z0 + CH * cell } });
       }
     }
     this.root.add(terrain);
@@ -809,27 +873,52 @@ export class WorldView {
     return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
   }
 
+  // Far away a tree is a handful of triangles: one cone or one blob on a stub.
+  #pineFarGeometry(rng) {
+    const cone = new THREE.ConeGeometry(2.4, 8.6, 5, 1, true);
+    cone.translate(0, 2.6 + 4.3, 0);
+    const trunk = new THREE.CylinderGeometry(0.2, 0.25, 2.8, 3, 1, true);
+    trunk.translate(0, 1.4, 0);
+    return mergeGeometries([colorizeGeometry(cone, '#30492a', 0.05, rng), colorizeGeometry(trunk, '#5b4028', 0.03, rng)].map((g) => g.toNonIndexed()));
+  }
+
+  #broadleafFarGeometry(rng, leaf) {
+    const blob = new THREE.OctahedronGeometry(3.1, 0);
+    blob.scale(1, 0.95, 1);
+    blob.translate(0, 5.7, 0);
+    const trunk = new THREE.CylinderGeometry(0.2, 0.3, 4, 3, 1, true);
+    trunk.translate(0, 2, 0);
+    return mergeGeometries([colorizeGeometry(blob, leaf, 0.06, rng), colorizeGeometry(trunk, '#5e4630', 0.03, rng)].map((g) => (g.index ? g.toNonIndexed() : g)));
+  }
+
   buildVegetation() {
     const d = this.data;
     const rng = mulberry32(99);
     // Types: 0 pine, 1 broadleaf, 2 cherry tree in blossom.
     const geos = [this.#pineGeometry(rng), this.#broadleafGeometry(rng), this.#broadleafGeometry(rng, '#f3b3cb', '#4a3328')];
     const lowGeos = [this.#pineLowGeometry(rng), this.#broadleafLowGeometry(rng), this.#broadleafLowGeometry(rng, '#f3b3cb', '#4a3328')];
-    const mats = geos.map(() => {
-      const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
-      addSway(m, this.uniforms, 0.035);
-      return m;
-    });
-    const chunkSize = 500;
-    const buckets = new Map();
+    // Three detail bands per tree, cut per instance in the vertex shader by the distance to the
+    // camera: full trees nearby (small chunks), light ones in the middle, a few triangles far away.
+    const farGeos = [this.#pineFarGeometry(rng), this.#broadleafFarGeometry(rng, '#4f7031'), this.#broadleafFarGeometry(rng, '#f3b3cb')];
+    const mats = [0, 1, 2].map((band) => geos.map(() => treeMaterial(this.uniforms, band)));
+    const lod = this.lod;
+    lod.hi = this.quality.shadows >= 2048 ? 260 : this.quality.shadows > 0 ? 210 : 160;
+    lod.mid = Math.min(900, this.quality.drawDistance * 0.45);
+    this.uniforms.uLodHi.value = lod.hi;
+    this.uniforms.uLodMid.value = lod.mid;
+    this.uniforms.uLodFar.value = this.quality.drawDistance + 300;
     const keep = this.quality.trees;
-    d.trees.forEach((t, i) => {
-      // Cherry trees are part of the scenery and always shown.
-      if (t.type !== 2 && ((i * 2654435761) % 1000) / 1000 >= keep) return;
-      const key = `${t.type}:${Math.floor((t.x + 2000) / chunkSize)}:${Math.floor((t.z + 2000) / chunkSize)}`;
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(t);
-    });
+    const bucket = (size) => {
+      const map = new Map();
+      d.trees.forEach((t, i) => {
+        // Cherry trees are part of the scenery and always shown.
+        if (t.type !== 2 && ((i * 2654435761) % 1000) / 1000 >= keep) return;
+        const key = `${t.type}:${Math.floor((t.x + 2000) / size)}:${Math.floor((t.z + 2000) / size)}`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(t);
+      });
+      return map;
+    };
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
@@ -842,11 +931,12 @@ export class WorldView {
       [new THREE.Color('#ffe4ee'), new THREE.Color('#ffffff'), new THREE.Color('#ffc2da')],
     ];
     const shadows = this.quality.shadows > 0;
-    for (const [key, list] of buckets) {
-      const type = Number(key.split(':')[0]);
-      const mesh = new THREE.InstancedMesh(geos[type], mats[type], list.length);
-      let cx = 0;
-      let cz = 0;
+    const build = (geo, mat, list, type) => {
+      const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
       list.forEach((t, i) => {
         q.setFromAxisAngle(up, t.rot);
         pos.set(t.x, t.y, t.z);
@@ -857,21 +947,37 @@ export class WorldView {
         const tt = tints[type];
         col.copy(tt[0]).lerp(tt[1], t.tint).lerp(tt[2], Math.max(0, t.tint - 0.7) * 1.6);
         mesh.setColorAt(i, col);
-        cx += t.x;
-        cz += t.z;
+        minX = Math.min(minX, t.x);
+        maxX = Math.max(maxX, t.x);
+        minZ = Math.min(minZ, t.z);
+        maxZ = Math.max(maxZ, t.z);
       });
       mesh.computeBoundingSphere();
+      mesh.matrixAutoUpdate = false;
+      return { mesh, box: { minX, maxX, minZ, maxZ } };
+    };
+    // Near band: 250 m chunks, casting shadows.
+    const depthMat = shadowBoxDepthMaterial(this.uniforms, true);
+    for (const [key, list] of bucket(250)) {
+      const type = Number(key.split(':')[0]);
+      const { mesh, box } = build(geos[type], mats[0][type], list, type);
       mesh.castShadow = shadows;
       mesh.receiveShadow = shadows;
-      // Far LOD shares the instance data with a much lighter geometry.
-      const low = new THREE.InstancedMesh(lowGeos[type], mats[type], list.length);
-      low.instanceMatrix = mesh.instanceMatrix;
-      low.instanceColor = mesh.instanceColor;
-      low.boundingSphere = mesh.boundingSphere.clone();
-      low.visible = false;
-      const center = new THREE.Vector3(cx / list.length, 0, cz / list.length);
-      this.root.add(mesh, low);
-      this.treeChunks.push({ hi: mesh, lo: low, center });
+      mesh.customDepthMaterial = depthMat;
+      this.root.add(mesh);
+      this.treeChunks.push({ mesh, box, band: 0 });
+    }
+    // Middle and far bands share 1000 m chunks and their instance data.
+    for (const [key, list] of bucket(1000)) {
+      const type = Number(key.split(':')[0]);
+      const { mesh, box } = build(lowGeos[type], mats[1][type], list, type);
+      const far = new THREE.InstancedMesh(farGeos[type], mats[2][type], list.length);
+      far.instanceMatrix = mesh.instanceMatrix;
+      far.instanceColor = mesh.instanceColor;
+      far.boundingSphere = mesh.boundingSphere.clone();
+      far.matrixAutoUpdate = false;
+      this.root.add(mesh, far);
+      this.treeChunks.push({ mesh, box, band: 1 }, { mesh: far, box, band: 2 });
     }
 
     // Rocks
@@ -902,6 +1008,7 @@ export class WorldView {
     });
     rocks.computeBoundingSphere();
     rocks.castShadow = shadows;
+    rocks.customDepthMaterial = shadowBoxDepthMaterial(this.uniforms, false);
     rocks.receiveShadow = true;
     this.root.add(rocks);
   }
@@ -1103,7 +1210,7 @@ export class WorldView {
     if (sq > 0) {
       sun.castShadow = true;
       sun.shadow.mapSize.set(sq, sq);
-      const e = 75;
+      const e = SHADOW_EXTENT;
       Object.assign(sun.shadow.camera, { left: -e, right: e, top: e, bottom: -e, near: 10, far: 900 });
       sun.shadow.bias = -0.0004;
       sun.shadow.normalBias = 0.04;
@@ -1180,7 +1287,7 @@ export class WorldView {
   setShadowFocus(target) {
     const e = this.sunLight;
     // Snap to shadow texels to reduce shimmering.
-    const step = 150 / (this.quality.shadows || 1024);
+    const step = (2 * SHADOW_EXTENT) / (this.quality.shadows || 1024);
     const fx = Math.round(target.x / step) * step;
     const fz = Math.round(target.z / step) * step;
     e.target.position.set(fx, target.y, fz);
@@ -1190,16 +1297,35 @@ export class WorldView {
 
   update(dt, camera) {
     this.uniforms.uTime.value += dt;
-    this.scenery?.update(dt);
+    this.scenery?.update(dt, camera);
     this.sky.position.copy(camera.position);
     this.stars.position.copy(camera.position);
     if (this.sky.material.uniforms.time) this.sky.material.uniforms.time.value += dt;
-    const far = this.quality.drawDistance;
+    // Terrain detail by distance to each chunk.
+    for (const c of this.terrainChunks) {
+      const b = c.box;
+      const d = Math.hypot(Math.max(b.minX - camera.position.x, 0, camera.position.x - b.maxX), Math.max(b.minZ - camera.position.z, 0, camera.position.z - b.maxZ));
+      const level = d < 420 ? 0 : d < 1000 ? 1 : d < 1900 ? 2 : 3;
+      if (level !== c.level) {
+        c.level = level;
+        c.mesh.geometry.setIndex(this.terrainLods[level]);
+      }
+    }
+    // Tree chunks: only those whose box reaches into their band's distance range.
+    const far = this.uniforms.uLodFar.value;
     const cp = camera.position;
+    const { hi, mid } = this.lod;
     for (const c of this.treeChunks) {
-      const dist = Math.hypot(c.center.x - cp.x, c.center.z - cp.z);
-      c.hi.visible = dist < 620;
-      c.lo.visible = dist >= 620 && dist < far + 350;
+      const b = c.box;
+      const dx = Math.max(b.minX - cp.x, 0, cp.x - b.maxX);
+      const dz = Math.max(b.minZ - cp.z, 0, cp.z - b.maxZ);
+      const near = Math.hypot(dx, dz);
+      const fx = Math.max(Math.abs(b.minX - cp.x), Math.abs(b.maxX - cp.x));
+      const fz = Math.max(Math.abs(b.minZ - cp.z), Math.abs(b.maxZ - cp.z));
+      const farthest = Math.hypot(fx, fz);
+      if (c.band === 0) c.mesh.visible = near <= hi;
+      else if (c.band === 1) c.mesh.visible = near <= mid && farthest > hi;
+      else c.mesh.visible = near <= far && farthest > mid;
     }
   }
 

@@ -1,6 +1,7 @@
 // Open-world layer for free roam: checkpoint runs, drift zones, speed traps, jump ramps and speed
 // zones, bonus boards and discoveries, their world markers, HUD, map data and saved progress.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { starsFor, rampSurface } from './activities.js';
 import { ROAD } from './config.js';
 import { clamp, formatTime, wrapAngle } from './util.js';
@@ -16,6 +17,7 @@ const fmt = (n) => Math.round(n).toLocaleString('de-DE');
 const km = (m) => `${(m / 1000).toFixed(2).replace('.', ',')} km`;
 const STAR = '★';
 const NO_STAR = '☆';
+const LABEL_FAR = 900; // labels are gone beyond this distance (m) and fully visible 250 m closer
 
 function loadProgress() {
   try {
@@ -52,6 +54,8 @@ export class OpenWorld {
     this.roadXp = 0;
     this.roadMilestone = Math.floor(this.discovery.fraction * 10);
     this.debris = [];
+    this.beams = [];
+    this.labels = [];
     this.speedZone = null;
     this.enabled = false;
     this.run = null;
@@ -127,7 +131,53 @@ export class OpenWorld {
     m.renderOrder = 6;
     m.userData.baseOpacity = mat.opacity;
     this.group.add(m);
-    (this.beams || (this.beams = [])).push(m);
+    this.beams.push(m);
+    return m;
+  }
+
+  // All static light beams of one kind in a single mesh. Colour comes from the vertices; the fade
+  // close to the camera runs in the vertex shader from each beam's centre (attribute aBeam).
+  #beamMesh(list) {
+    if (!this.beamMat) {
+      this.beamMat = new THREE.MeshBasicMaterial({
+        map: this.beamTex,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: false,
+        toneMapped: false,
+      });
+      this.beamMat.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aBeam;').replace(
+          '#include <color_vertex>',
+          `#include <color_vertex>
+          vColor.a *= clamp((length(aBeam - cameraPosition.xz) - 8.0) / 40.0, 0.0, 1.0);`,
+        );
+      };
+      this.beamMat.customProgramCacheKey = () => 'openworld-beams';
+    }
+    const col = new THREE.Color();
+    const geos = list.map(({ x, y, z, color, height, radius }) => {
+      const geo = new THREE.CylinderGeometry(radius, radius, height, 20, 1, true);
+      geo.translate(x, y + height / 2, z);
+      const n = geo.attributes.position.count;
+      const rgba = new Float32Array(n * 4);
+      const centre = new Float32Array(n * 2);
+      col.set(color);
+      for (let i = 0; i < n; i++) {
+        rgba.set([col.r, col.g, col.b, 1], i * 4);
+        centre.set([x, z], i * 2);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(rgba, 4));
+      geo.setAttribute('aBeam', new THREE.BufferAttribute(centre, 2));
+      return geo;
+    });
+    const m = new THREE.Mesh(mergeGeometries(geos), this.beamMat);
+    m.renderOrder = 6;
+    this.group.add(m);
     return m;
   }
 
@@ -137,7 +187,9 @@ export class OpenWorld {
     s.position.set(x, y, z);
     s.scale.set(11 * scale, 3.45 * scale, 1);
     s.renderOrder = 7;
+    s.userData.hidden = false;
     this.group.add(s);
+    this.labels.push(s);
     return s;
   }
 
@@ -147,13 +199,33 @@ export class OpenWorld {
     sprite.material.needsUpdate = true;
   }
 
-  #ring(x, y, z, color, inner = 5.5, outer = 7) {
-    const geo = new THREE.RingGeometry(inner, outer, 48);
-    geo.rotateX(-Math.PI / 2);
+  #ring(geo, color) {
     const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
     const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y + 0.25, z);
     m.renderOrder = 6;
+    this.group.add(m);
+    return m;
+  }
+
+  // One InstancedMesh for many copies of a static part (matrices in world space).
+  #instanced(geo, mat, matrices, shadow = true) {
+    const m = new THREE.InstancedMesh(geo, mat, matrices.length);
+    matrices.forEach((mx, i) => m.setMatrixAt(i, mx));
+    m.castShadow = shadow;
+    m.computeBoundingSphere();
+    this.group.add(m);
+    return m;
+  }
+
+  // Two single-sided planes back to back in one mesh, so the text reads correctly from both sides.
+  #banner(width, height, x, y, z, heading, mat) {
+    const geos = [Math.PI, 0].map((turn) => {
+      const g = new THREE.PlaneGeometry(width, height);
+      g.rotateY(heading + turn);
+      g.translate(x, y, z);
+      return g;
+    });
+    const m = new THREE.Mesh(mergeGeometries(geos), mat);
     this.group.add(m);
     return m;
   }
@@ -167,14 +239,24 @@ export class OpenWorld {
     this.beamTex = TX.beamTexture();
     const d = this.data;
 
-    // Checkpoint runs: start marker with light beam, ring and name.
+    // Static beams of all activities, collected while building and merged at the end.
+    const beams = [];
+    // Checkpoint runs: start marker with light beam, ring and name. Beams and rings of all runs
+    // are one mesh each, they show and hide together.
+    const runBeams = [];
+    const rings = [];
     this.runMarkers = d.routes.map((r) => {
       const y = this.#groundY(r.start.x, r.start.z);
-      const beam = this.#beam(r.start.x, y, r.start.z, ACTIVITY_COLORS.run, 160, 1.8);
-      const ring = this.#ring(r.start.x, y, r.start.z, ACTIVITY_COLORS.run);
+      runBeams.push({ x: r.start.x, y, z: r.start.z, color: ACTIVITY_COLORS.run, height: 160, radius: 1.8 });
+      const ring = new THREE.RingGeometry(5.5, 7, 48);
+      ring.rotateX(-Math.PI / 2);
+      ring.translate(r.start.x, y + 0.25, r.start.z);
+      rings.push(ring);
       const label = this.#label(r.start.x, y + 9, r.start.z, r.name, this.#runSub(r), ACTIVITY_COLORS.run);
-      return { route: r, beam, ring, label };
+      return { route: r, label };
     });
+    this.runBeams = this.#beamMesh(runBeams);
+    this.runRing = this.#ring(mergeGeometries(rings), ACTIVITY_COLORS.run);
 
     // Gates for an active run (current, next) and a finish variant.
     const torus = new THREE.TorusGeometry(7.5, 0.32, 10, 60);
@@ -193,6 +275,7 @@ export class OpenWorld {
     const pillarGeo = new THREE.BoxGeometry(0.7, 7.5, 0.7);
     pillarGeo.translate(0, 3.75, 0);
     const pillarMat = new THREE.MeshStandardMaterial({ color: '#2a2230', metalness: 0.5, roughness: 0.4, emissive: ACTIVITY_COLORS.drift, emissiveIntensity: 0.35 });
+    const driftPillars = [];
     this.zoneMarkers = d.driftZones.map((z) => {
       const parts = [];
       for (const [s, title] of [
@@ -202,27 +285,17 @@ export class OpenWorld {
         const p = this.track.pointAt(s, 0, {});
         for (const sd of [1, -1]) {
           const pp = this.track.pointAt(s, sd * (ROAD.halfTotal + 1.2), {});
-          const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-          pillar.position.set(pp.x, this.#groundY(pp.x, pp.z), pp.z);
-          pillar.castShadow = true;
-          this.group.add(pillar);
-          parts.push(pillar);
+          driftPillars.push(new THREE.Matrix4().makeTranslation(pp.x, this.#groundY(pp.x, pp.z), pp.z));
           this.data.colliders.addCircle(pp.x, pp.z, 0.6, 'pole');
         }
-        // Two single-sided planes so the text reads correctly from both directions.
         const bannerMat = new THREE.MeshBasicMaterial({ map: TX.labelTexture(title, z.name, ACTIVITY_COLORS.drift), toneMapped: false });
-        for (const turn of [Math.PI, 0]) {
-          const banner = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.width + 3, 2.4), bannerMat);
-          banner.position.set(p.x, p.h + 8, p.z);
-          banner.rotation.y = p.heading + turn;
-          this.group.add(banner);
-          parts.push(banner);
-        }
+        parts.push(this.#banner(ROAD.width + 3, 2.4, p.x, p.h + 8, p.z, p.heading, bannerMat));
       }
       const p0 = this.track.pointAt(z.s0, 0, {});
-      const beam = this.#beam(p0.x, p0.h, p0.z, ACTIVITY_COLORS.drift, 110, 1.3);
-      return { zone: z, parts, beam };
+      beams.push({ x: p0.x, y: p0.h, z: p0.z, color: ACTIVITY_COLORS.drift, height: 110, radius: 1.3 });
+      return { zone: z, parts };
     });
+    this.#instanced(pillarGeo, pillarMat, driftPillars);
 
     // Speed traps: roadside pole with a radar box and a sign.
     const trapPole = new THREE.CylinderGeometry(0.12, 0.14, 4.2, 10);
@@ -230,61 +303,63 @@ export class OpenWorld {
     const trapBox = new THREE.BoxGeometry(0.55, 0.45, 0.8);
     const trapMat = new THREE.MeshStandardMaterial({ color: '#d9dde2', metalness: 0.3, roughness: 0.5 });
     const poleMat = new THREE.MeshStandardMaterial({ color: '#3a3f46', metalness: 0.6, roughness: 0.4 });
-    this.trapLeds = [];
+    const trapParts = { pole: [], box: [], led: [] };
+    const local = new THREE.Matrix4();
     this.trapMarkers = d.speedTraps.map((t) => {
       const y = this.#groundY(t.poleX, t.poleZ);
-      const g = new THREE.Group();
-      g.position.set(t.poleX, y, t.poleZ);
-      g.rotation.y = t.heading + Math.PI;
-      const pole = new THREE.Mesh(trapPole, poleMat);
-      pole.castShadow = true;
-      g.add(pole);
-      const box = new THREE.Mesh(trapBox, trapMat);
-      box.position.set(0, 4.3, 0);
-      box.castShadow = true;
-      g.add(box);
-      const led = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff2a1a', toneMapped: false }));
-      led.position.set(0.15, 4.45, 0.41);
-      g.add(led);
-      this.trapLeds.push(led);
-      this.group.add(g);
+      const base = new THREE.Matrix4().makeRotationY(t.heading + Math.PI).setPosition(t.poleX, y, t.poleZ);
+      trapParts.pole.push(base);
+      trapParts.box.push(base.clone().multiply(local.makeTranslation(0, 4.3, 0)));
+      trapParts.led.push(base.clone().multiply(local.makeTranslation(0.15, 4.45, 0.41)));
       this.data.colliders.addCircle(t.poleX, t.poleZ, 0.4, 'pole');
       const label = this.#label(t.poleX, y + 7, t.poleZ, t.name, this.#trapSub(t), ACTIVITY_COLORS.trap, 0.8);
-      const beam = this.#beam(t.poleX, y, t.poleZ, ACTIVITY_COLORS.trap, 60, 0.8);
-      return { trap: t, group: g, label, beam };
+      beams.push({ x: t.poleX, y, z: t.poleZ, color: ACTIVITY_COLORS.trap, height: 60, radius: 0.8 });
+      return { trap: t, label };
     });
+    this.#instanced(trapPole, poleMat, trapParts.pole);
+    this.#instanced(trapBox, trapMat, trapParts.box);
+    // The radar LEDs of all traps blink together.
+    this.trapLed = this.#instanced(new THREE.SphereGeometry(0.09, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff2a1a', toneMapped: false }), trapParts.led, false);
 
     // Ramps
     const rampMat = new THREE.MeshStandardMaterial({ map: TX.rampTexture(), roughness: 0.85, side: THREE.DoubleSide });
     const sideMat = new THREE.MeshStandardMaterial({ color: '#4a3622', roughness: 0.9, side: THREE.DoubleSide });
+    const decks = [];
+    const walls = [];
     this.rampMarkers = d.ramps.map((r) => {
       const { top, sides } = this.#rampGeometry(r);
-      const deck = new THREE.Mesh(top, rampMat);
-      deck.castShadow = true;
-      deck.receiveShadow = true;
-      const walls = new THREE.Mesh(sides, sideMat);
-      walls.castShadow = true;
-      this.group.add(deck, walls);
+      decks.push(top);
+      walls.push(sides);
       const fx = Math.sin(r.yaw);
       const fz = Math.cos(r.yaw);
       const bx = r.x - fx * 6;
       const bz = r.z - fz * 6;
       const y = this.#groundY(bx, bz);
-      const beam = this.#beam(bx, y, bz, ACTIVITY_COLORS.jump, 90, 1.2);
+      beams.push({ x: bx, y, z: bz, color: ACTIVITY_COLORS.jump, height: 90, radius: 1.2 });
       const label = this.#label(bx, y + 8, bz, r.name, this.#jumpSub(r), ACTIVITY_COLORS.jump, 0.85);
-      return { ramp: r, beam, label };
+      return { ramp: r, label };
     });
+    if (decks.length) {
+      const deck = new THREE.Mesh(mergeGeometries(decks), rampMat);
+      deck.castShadow = true;
+      deck.receiveShadow = true;
+      const side = new THREE.Mesh(mergeGeometries(walls), sideMat);
+      side.castShadow = true;
+      this.group.add(deck, side);
+    }
 
     this.#buildTrails();
-    this.#buildSpeedZones();
+    this.#buildSpeedZones(beams);
     this.#buildBoards();
+    this.#beamMesh(beams);
   }
 
   // Speed zones: yellow arches at the start and the end of the measured stretch.
-  #buildSpeedZones() {
+  #buildSpeedZones(beams) {
     const pillarGeo = new THREE.BoxGeometry(0.6, 7, 0.6);
     pillarGeo.translate(0, 3.5, 0);
     const pillarMat = new THREE.MeshStandardMaterial({ color: '#2b2a22', metalness: 0.5, roughness: 0.4, emissive: ACTIVITY_COLORS.zone, emissiveIntensity: 0.35 });
+    const pillars = [];
     const roads = [this.track, ...this.data.branches];
     this.zoneGates = this.data.speedZones.map((z) => {
       const road = roads.find((r) => (r.id || 'circuit') === z.roadId) || this.track;
@@ -298,25 +373,17 @@ export class OpenWorld {
         const p = road.pointAt(s, 0, {});
         for (const sd of [1, -1]) {
           const pp = road.pointAt(s, sd * (ht + 1.2), {});
-          const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-          pillar.position.set(pp.x, this.#groundY(pp.x, pp.z), pp.z);
-          pillar.castShadow = true;
-          this.group.add(pillar);
+          pillars.push(new THREE.Matrix4().makeTranslation(pp.x, this.#groundY(pp.x, pp.z), pp.z));
           this.data.colliders.addCircle(pp.x, pp.z, 0.5, 'pole');
         }
         const mat = new THREE.MeshBasicMaterial({ map: TX.labelTexture(title, z.name, ACTIVITY_COLORS.zone), toneMapped: false });
-        for (const turn of [Math.PI, 0]) {
-          const banner = new THREE.Mesh(new THREE.PlaneGeometry(2 * ht + 2.4, 2.2), mat);
-          banner.position.set(p.x, p.h + 7.4, p.z);
-          banner.rotation.y = p.heading + turn;
-          this.group.add(banner);
-          parts.push(banner);
-        }
+        parts.push(this.#banner(2 * ht + 2.4, 2.2, p.x, p.h + 7.4, p.z, p.heading, mat));
       }
       const p0 = road.pointAt(z.s0, 0, {});
-      const beam = this.#beam(p0.x, p0.h, p0.z, ACTIVITY_COLORS.zone, 80, 1.1);
-      return { zone: z, parts, beam };
+      beams.push({ x: p0.x, y: p0.h, z: p0.z, color: ACTIVITY_COLORS.zone, height: 80, radius: 1.1 });
+      return { zone: z, parts };
     });
+    this.#instanced(pillarGeo, pillarMat, pillars);
   }
 
   // Bonus boards: orange signs on two posts, smashed by driving through them.
@@ -331,25 +398,35 @@ export class OpenWorld {
     const post = new THREE.CylinderGeometry(0.07, 0.07, 2.4, 6);
     post.translate(0, 1.2, 0);
     this.boardParts = { faceMat, backMat, postMat, face, back, post };
-    this.boardMarkers = this.data.bonusBoards.map((b) => {
-      const g = new THREE.Group();
-      g.position.set(b.x, b.y, b.z);
-      g.rotation.y = b.yaw;
-      for (const sd of [-1, 1]) {
-        const m = new THREE.Mesh(post, postMat);
-        m.position.x = sd * 1.35;
-        g.add(m);
-      }
-      const f = new THREE.Mesh(face, faceMat);
-      f.position.y = 2.6;
-      const bk = new THREE.Mesh(back, backMat);
-      bk.position.y = 2.6;
-      g.add(f, bk);
-      g.traverse((o) => (o.castShadow = true));
-      g.visible = !this.career.boards.has(b.id);
-      this.group.add(g);
-      return { board: b, group: g };
+    // All boards share three instanced meshes; a smashed board gets a zero matrix.
+    const n = this.data.bonusBoards.length;
+    const none = new Array(n).fill(new THREE.Matrix4().makeScale(0, 0, 0));
+    this.boardMeshes = {
+      posts: this.#instanced(post, postMat, [...none, ...none]),
+      faces: this.#instanced(face, faceMat, none),
+      backs: this.#instanced(back, backMat, none),
+    };
+    this.boardMarkers = this.data.bonusBoards.map((b, index) => {
+      const m = { board: b, index, alive: !this.career.boards.has(b.id) };
+      this.#placeBoard(m);
+      return m;
     });
+    for (const mesh of Object.values(this.boardMeshes)) mesh.computeBoundingSphere();
+  }
+
+  #placeBoard(m) {
+    const { posts, faces, backs } = this.boardMeshes;
+    const b = m.board;
+    const base = new THREE.Matrix4();
+    if (m.alive) base.makeRotationY(b.yaw).setPosition(b.x, b.y, b.z);
+    else base.makeScale(0, 0, 0);
+    const local = new THREE.Matrix4();
+    const at = (x, y) => base.clone().multiply(local.makeTranslation(x, y, 0));
+    posts.setMatrixAt(m.index * 2, at(-1.35, 0));
+    posts.setMatrixAt(m.index * 2 + 1, at(1.35, 0));
+    faces.setMatrixAt(m.index, at(0, 2.6));
+    backs.setMatrixAt(m.index, at(0, 2.6));
+    for (const mesh of [posts, faces, backs]) mesh.instanceMatrix.needsUpdate = true;
   }
 
   #rampGeometry(r) {
@@ -482,11 +559,9 @@ export class OpenWorld {
 
   // Start markers show while no run is active; gates only during a run.
   #showRunMarkers(on) {
-    for (const m of this.runMarkers) {
-      m.beam.visible = on;
-      m.ring.visible = on;
-      m.label.visible = on;
-    }
+    this.runBeams.visible = on;
+    this.runRing.visible = on;
+    for (const m of this.runMarkers) m.label.userData.hidden = !on;
     if (on) {
       for (const g of this.gates) g.visible = false;
       this.gateBeam.visible = false;
@@ -581,14 +656,22 @@ export class OpenWorld {
     if (!this.enabled) return;
     this.time += dt;
     const pulse = 0.55 + 0.35 * Math.sin(this.time * 3);
-    for (const m of this.runMarkers) m.ring.material.opacity = pulse;
-    for (const led of this.trapLeds) led.visible = Math.sin(this.time * 6) > 0;
+    this.runRing.material.opacity = pulse;
+    this.trapLed.visible = Math.sin(this.time * 6) > 0;
     for (const g of this.gates) g.rotation.z += dt * 0.4;
-    // Light beams fade out close to the camera so they never wash over the screen.
+    // Light beams fade out close to the camera so they never wash over the screen (the static
+    // ones do this in their shader).
     const cam = this.game.camera.position;
     for (const b of this.beams) {
       const d = Math.hypot(b.position.x - cam.x, b.position.z - cam.z);
       b.material.opacity = b.userData.baseOpacity * clamp((d - 8) / 40, 0, 1);
+    }
+    // Name labels fade out in the distance, where they would only be a few unreadable pixels.
+    for (const l of this.labels) {
+      const d = Math.hypot(l.position.x - cam.x, l.position.z - cam.z);
+      const a = clamp((LABEL_FAR - d) / 250, 0, 1);
+      l.material.opacity = a;
+      l.visible = a > 0 && !l.userData.hidden;
     }
     if (this.resultTimer > 0) {
       this.resultTimer -= dt;
@@ -661,11 +744,12 @@ export class OpenWorld {
   #updateBoards(v) {
     if (v.speed < 4) return;
     for (const m of this.boardMarkers) {
-      if (!m.group.visible) continue;
+      if (!m.alive) continue;
       const b = m.board;
       if (Math.abs(v.x - b.x) > 4 || Math.abs(v.z - b.z) > 4) continue;
       if (Math.hypot(v.x - b.x, v.z - b.z) > 3.4 || Math.abs(v.y - b.y) > 3) continue;
-      m.group.visible = false;
+      m.alive = false;
+      this.#placeBoard(m);
       this.career.smash(b.id);
       this.#shatter(m, v);
       this.game.audio.crash(6);
@@ -1146,7 +1230,7 @@ export class OpenWorld {
       });
     }
     for (const m of this.boardMarkers) {
-      if (!m.group.visible) continue;
+      if (!m.alive) continue;
       const b = m.board;
       out.push({ kind: 'board', id: b.id, name: 'Bonusschild', label: 'Sammelobjekt', blurb: 'Durchfahren und zerstören', x: b.x, z: b.z, color: ICON_COLORS.board, stats: [['Belohnung', `${fmt(XP.board)} XP`]] });
     }

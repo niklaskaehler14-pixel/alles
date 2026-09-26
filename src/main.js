@@ -7,7 +7,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { QUALITY, ROAD, WORLD } from './config.js';
 import { WorldData } from './worldgen.js';
-import { WorldView, TIME_PRESETS } from './world.js';
+import { WorldView, TIME_PRESETS, SHADOW_EXTENT } from './world.js';
 import { Vehicle } from './vehicle.js';
 import { CarModel } from './carModel.js';
 import { AIDriver } from './ai.js';
@@ -166,10 +166,14 @@ class Game {
     const text = document.getElementById('load-text');
     const steps = 18;
     let done = 0;
+    // Duration of every loading step (ms), kept for diagnostics.
+    this.bootTimes = [];
     const step = async (label, fn) => {
       text.textContent = label + ' …';
       await nextFrame();
+      const t0 = performance.now();
       await fn();
+      this.bootTimes.push([label, Math.round(performance.now() - t0)]);
       done++;
       fill.style.width = `${Math.round((done / steps) * 100)}%`;
     };
@@ -600,7 +604,7 @@ class Game {
           sun.shadow.map.dispose();
           sun.shadow.map = null;
         }
-        const e = 75;
+        const e = SHADOW_EXTENT;
         Object.assign(sun.shadow.camera, { left: -e, right: e, top: e, bottom: -e, near: 10, far: 900 });
         sun.shadow.camera.updateProjectionMatrix();
         sun.shadow.bias = -0.0004;
@@ -1548,7 +1552,12 @@ class Game {
       this.playerModel.update(v);
       const braking = v.gear > 0 ? v.brake : v.gear < 0 ? v.throttle : 0;
       this.playerModel.setLights({ headlights: this.#headlightsOn(), brake: braking > 0.05 ? 1 : 0, reverse: v.gear < 0 });
+      const cam = this.camera.position;
       for (const a of this.ai) {
+        // Distant cars: simplified model, very distant ones not drawn at all.
+        const d = Math.hypot(a.x - cam.x, a.z - cam.z);
+        a.model.root.visible = d < 750;
+        a.model.setDetail(d < 70);
         a.model.update(a);
         a.model.setLights({ headlights: this.world.night > 0, brake: a.brake > 0.1 ? 1 : 0 });
       }

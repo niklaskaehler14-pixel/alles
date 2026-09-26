@@ -76,6 +76,7 @@ Ein Klick auf eine freie Stelle setzt einen Wegpunkt. Fortschritt und Bestwerte 
 - **Sound** (`src/audio.js`): komplett synthetisch. Dazu gehören ein Reihensechszylinder mit Last und Schiebebetrieb, Fehlzündungen, Turbo und Blow-off, Reifenquietschen, Schotter, Randsteine, Wind, Crashs und die Startampel.
 - **KI** (`src/ai.js`): Ideallinie mit Kurvenschneiden, vorausschauende Geschwindigkeitsplanung, Überholen und leichtes Rubber-Banding.
 - **Grafik**: Three.js mit Schatten, Bloom, Bewegungsunschärfe bei hohem Tempo und ACES-Tonemapping. Die Auflösung passt sich automatisch an, wenn die Bildrate sinkt.
+- **Performance**: Bäume haben drei Detailstufen, die der Shader für jeden Baum einzeln nach der Entfernung wählt. Das Gelände hat vier Stufen, Schürzen an den Kanten verhindern Risse. Ferne Autos werden vereinfacht gezeichnet. Säulen, Blitzer, Bonusschilder und Gondeln sind instanziert, Lichtsäulen, Ringe, Banner und Schanzen zu wenigen Meshes zusammengefasst. Der Schattendurchgang zeichnet Bäume und Felsen nur innerhalb der Schattenbox ums Auto.
 
 ## Starten
 

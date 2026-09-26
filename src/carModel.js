@@ -497,6 +497,50 @@ export class CarModel {
     if (this.interior) mergeByMaterial(this.interior, `${detail}:interior`, [this.steeringWheel]);
     if (this.steeringWheel) mergeByMaterial(this.steeringWheel, `${detail}:wheel`, []);
     if (this.driver) mergeByMaterial(this.driver, `${detail}:driver`, []);
+    this.#buildFarLod(M, cabin);
+  }
+
+  // Far away only the body, the glass, the lights and four static wheels are drawn (6 draw calls
+  // instead of 20+). setDetail(false) switches to it.
+  #buildFarLod(M, cabin) {
+    if (!shared.farWheels) {
+      const parts = [];
+      const rims = [];
+      for (const [x, z] of [
+        [WHEEL_X, AXLE_F],
+        [-WHEEL_X, AXLE_F],
+        [WHEEL_X, AXLE_R],
+        [-WHEEL_X, AXLE_R],
+      ]) {
+        const g = shared.tire.index ? shared.tire.toNonIndexed() : shared.tire.clone();
+        g.translate(x, WHEEL_R, z);
+        parts.push(g);
+        // Closed disc inside the tyre so the wheel does not look hollow.
+        const rim = new THREE.CylinderGeometry(0.232, 0.232, 0.2, 18);
+        rim.rotateZ(Math.PI / 2);
+        rim.translate(x, WHEEL_R, z);
+        rims.push(rim);
+      }
+      shared.farWheels = mergeGeometries(parts);
+      shared.farRims = mergeGeometries(rims);
+    }
+    this.farWheels = mesh(shared.farWheels, M.tire);
+    this.farWheels.visible = false;
+    this.farRims = mesh(shared.farRims, M.rim, false);
+    this.farRims.visible = false;
+    this.tilt.add(this.farWheels, this.farRims);
+    const keep = new Set([this.paint, this.headMat, this.tailMat]);
+    this.nearOnly = this.chassis.children.filter((o) => o !== cabin && !(o.isMesh && keep.has(o.material)));
+    for (const w of this.wheels) this.nearOnly.push(w.mount);
+    this.near = true;
+  }
+
+  setDetail(near) {
+    if (near === this.near) return;
+    this.near = near;
+    for (const o of this.nearOnly) o.visible = near;
+    this.farWheels.visible = !near;
+    this.farRims.visible = !near;
   }
 
   #addDetails(M) {

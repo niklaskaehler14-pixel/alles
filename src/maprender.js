@@ -66,22 +66,37 @@ export function renderTerrainRaster(data, size = 2048) {
   const lx = L[0] / ll;
   const ly = L[1] / ll;
   const lz = L[2] / ll;
-  const e = Math.max(2, mpp * 1.2);
   const d = img.data;
-  for (let py = 0; py < size; py++) {
+  // Heights are sampled once per pixel into a rolling window of three rows (with a one-pixel
+  // border), so the slope and the contour lines come from the neighbouring pixels.
+  const W = size + 2;
+  const sampleRow = (py, out) => {
     const z = -half + (py + 0.5) * mpp;
+    for (let i = 0; i < W; i++) out[i] = hf.get(-half + (i - 0.5) * mpp, z);
+  };
+  let prev = new Float32Array(W);
+  let cur = new Float32Array(W);
+  let next = new Float32Array(W);
+  sampleRow(-1, prev);
+  sampleRow(0, cur);
+  const inv2e = 1 / (2 * mpp);
+  const cityR = CITY.radius + 6;
+  const festR2 = FESTIVAL.radius * FESTIVAL.radius;
+  const festIn2 = (FESTIVAL.radius - 3) * (FESTIVAL.radius - 3);
+  for (let py = 0; py < size; py++) {
+    sampleRow(py + 1, next);
+    const z = -half + (py + 0.5) * mpp;
+    const nearCity = Math.abs(z - CITY.z) < cityR;
+    const nearFest = Math.abs(z - FESTIVAL.z) < FESTIVAL.radius;
     for (let px = 0; px < size; px++) {
       const x = -half + (px + 0.5) * mpp;
-      const h = hf.get(x, z);
-      const hx = hf.get(x + e, z) - hf.get(x - e, z);
-      const hz = hf.get(x, z + e) - hf.get(x, z - e);
-      let nx = -hx / (2 * e);
-      let ny = 1;
-      let nz = -hz / (2 * e);
-      const nl = Math.hypot(nx, ny, nz);
-      nx /= nl;
-      ny /= nl;
-      nz /= nl;
+      const h = cur[px + 1];
+      const nx0 = -(cur[px + 2] - cur[px]) * inv2e;
+      const nz0 = -(next[px + 1] - prev[px + 1]) * inv2e;
+      const nl = 1 / Math.sqrt(nx0 * nx0 + 1 + nz0 * nz0);
+      const nx = nx0 * nl;
+      const ny = nl;
+      const nz = nz0 * nl;
       const lambert = nx * lx + ny * ly + nz * lz;
       const shade = clamp(0.35 + lambert * 0.95, 0.45, 1.25);
       let r;
@@ -108,54 +123,62 @@ export function renderTerrainRaster(data, size = 2048) {
         r += (58 - r) * f * 0.75;
         g += (92 - g) * f * 0.75;
         b += (56 - b) * f * 0.75;
-        const rock = smoothstep(0.2, 0.42, slope) + smoothstep(260, 360, h) * 0.6;
-        r += (132 - r) * clamp(rock, 0, 1);
-        g += (126 - g) * clamp(rock, 0, 1);
-        b += (118 - b) * clamp(rock, 0, 1);
-        const snow = smoothstep(380, 440, h) * smoothstep(0.45, 0.2, slope);
-        r += (236 - r) * snow;
-        g += (240 - g) * snow;
-        b += (244 - b) * snow;
-        const beach = smoothstep(2.6, 0.8, h);
-        r += (196 - r) * beach;
-        g += (184 - g) * beach;
-        b += (140 - b) * beach;
+        const rock = clamp(smoothstep(0.2, 0.42, slope) + smoothstep(260, 360, h) * 0.6, 0, 1);
+        r += (132 - r) * rock;
+        g += (126 - g) * rock;
+        b += (118 - b) * rock;
+        if (h > 380) {
+          const snow = smoothstep(380, 440, h) * smoothstep(0.45, 0.2, slope);
+          r += (236 - r) * snow;
+          g += (240 - g) * snow;
+          b += (244 - b) * snow;
+        }
+        if (h < 2.6) {
+          const beach = smoothstep(2.6, 0.8, h);
+          r += (196 - r) * beach;
+          g += (184 - g) * beach;
+          b += (140 - b) * beach;
+        }
         r *= shade;
         g *= shade;
         b *= shade;
         // Faint contour every 25 m
         const c0 = Math.floor(h / 25);
-        if (c0 !== Math.floor(hf.get(x + mpp, z) / 25) || c0 !== Math.floor(hf.get(x, z + mpp) / 25)) {
+        if (c0 !== Math.floor(cur[px + 2] / 25) || c0 !== Math.floor(next[px + 1] / 25)) {
           r *= 0.9;
           g *= 0.9;
           b *= 0.9;
         }
       }
-      const dc = Math.hypot(x - CITY.x, z - CITY.z);
-      if (dc < CITY.radius + 6) {
-        const k = smoothstep(CITY.radius + 6, CITY.radius - 4, dc);
-        r += (126 - r) * k;
-        g += (128 - g) * k;
-        b += (134 - b) * k;
-        // Street grid
-        const gx = (((x - CITY.x) % CITY.grid) + CITY.grid) % CITY.grid;
-        const gz = (((z - CITY.z) % CITY.grid) + CITY.grid) % CITY.grid;
-        const street = Math.min(gx, CITY.grid - gx) < CITY.street / 2 || Math.min(gz, CITY.grid - gz) < CITY.street / 2;
-        if (street && k > 0.5) {
-          r = 168;
-          g = 170;
-          b = 176;
+      if (nearCity && Math.abs(x - CITY.x) < cityR) {
+        const dc = Math.sqrt((x - CITY.x) * (x - CITY.x) + (z - CITY.z) * (z - CITY.z));
+        if (dc < cityR) {
+          const k = smoothstep(CITY.radius + 6, CITY.radius - 4, dc);
+          r += (126 - r) * k;
+          g += (128 - g) * k;
+          b += (134 - b) * k;
+          // Street grid
+          const gx = (((x - CITY.x) % CITY.grid) + CITY.grid) % CITY.grid;
+          const gz = (((z - CITY.z) % CITY.grid) + CITY.grid) % CITY.grid;
+          const street = Math.min(gx, CITY.grid - gx) < CITY.street / 2 || Math.min(gz, CITY.grid - gz) < CITY.street / 2;
+          if (street && k > 0.5) {
+            r = 168;
+            g = 170;
+            b = 176;
+          }
         }
       }
-      const df = Math.hypot(x - FESTIVAL.x, z - FESTIVAL.z);
-      if (df < FESTIVAL.radius) {
-        r = 84;
-        g = 86;
-        b = 94;
-        if (df > FESTIVAL.radius - 3) {
-          r = 255;
-          g = 63;
-          b = 164;
+      if (nearFest) {
+        const df2 = (x - FESTIVAL.x) * (x - FESTIVAL.x) + (z - FESTIVAL.z) * (z - FESTIVAL.z);
+        if (df2 < festR2) {
+          r = 84;
+          g = 86;
+          b = 94;
+          if (df2 > festIn2) {
+            r = 255;
+            g = 63;
+            b = 164;
+          }
         }
       }
       const i = (px + py * size) * 4;
@@ -164,6 +187,10 @@ export function renderTerrainRaster(data, size = 2048) {
       d[i + 2] = b;
       d[i + 3] = 255;
     }
+    const spare = prev;
+    prev = cur;
+    cur = next;
+    next = spare;
   }
   ctx.putImageData(img, 0, 0);
   // Buildings with a light roof and a dark outline.

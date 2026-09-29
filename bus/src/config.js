@@ -29,9 +29,9 @@ export const WORLD = {
 };
 
 export const QUALITY = {
-  low: { pixelRatio: 1.25, shadows: 0, bloom: false, trees: 0.5, pedestrians: 26, traffic: 14, mirrors: false, drawDistance: 700 },
-  medium: { pixelRatio: 1.6, shadows: 1024, bloom: false, trees: 0.8, pedestrians: 44, traffic: 22, mirrors: true, drawDistance: 1000 },
-  high: { pixelRatio: 2, shadows: 2048, bloom: true, trees: 1, pedestrians: 64, traffic: 30, mirrors: true, drawDistance: 1400 },
+  low: { pixelRatio: 1.25, shadows: 0, trees: 0.5, pedestrians: 26, traffic: 14, mirrors: false, drawDistance: 700 },
+  medium: { pixelRatio: 1.6, shadows: 1024, trees: 0.8, pedestrians: 44, traffic: 22, mirrors: true, drawDistance: 1000 },
+  high: { pixelRatio: 2, shadows: 2048, trees: 1, pedestrians: 64, traffic: 30, mirrors: true, drawDistance: 1400 },
 };
 
 export const PHYSICS_DT = 1 / 120;

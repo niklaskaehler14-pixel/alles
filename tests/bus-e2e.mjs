@@ -103,19 +103,83 @@ try {
     console.log('    faults', JSON.stringify(s.faults));
     await shot('07-report');
   });
-  await step('manual trip start (ticket sale, doors)', async () => {
+  await step('menu tabs', async () => {
     await page.click('#r-menu');
     await run(800);
+    await page.click('[data-tab="fleet"]');
+    await run(400);
+    const cards = await page.locator('.bus-card').count();
+    if (cards !== 4) throw new Error(`expected 4 buses in the fleet, got ${cards}`);
+    await shot('08-fleet');
+    await page.click('[data-tab="drive"]');
+  });
+  await step('ticket sale by hand', async () => {
     await page.evaluate(() => window.__bus.start({ tripId: '1a', difficulty: 'normal' }));
-    await run(1500);
+    await run(1000);
     await page.keyboard.press('Space');
-    await run(6000);
-    await shot('08-manual-doors');
-    const sale = await page.evaluate(() => !document.getElementById('ticket').hidden);
-    console.log('    ticket panel open:', sale);
+    const ok = await page.evaluate(() => {
+      const B = window.__bus;
+      for (let i = 0; i < 60 && !B.G.sim.trip.pendingSale; i++) B.fastForward(1);
+      return !!B.G.sim.trip.pendingSale;
+    });
+    if (!ok) throw new Error('no passenger asked for a ticket');
+    await run(500);
+    if (await page.locator('#ticket').isHidden()) throw new Error('ticket panel not shown');
+    // Sell the right ticket with exact change.
+    const plan = await page.evaluate(() => {
+      const r = window.__bus.G.sim.trip.pendingSale.request;
+      return { fare: r.fare, change: Math.round((r.paid - r.price) * 100) };
+    });
+    await page.click(`[data-fare="${plan.fare}"]`);
+    let cents = plan.change;
+    const coins = [1000, 500, 200, 100, 50, 20, 10];
+    const labels = ['10 €', '5 €', '2 €', '1 €', '50 ct', '20 ct', '10 ct'];
+    for (let k = 0; k < coins.length; k++) {
+      while (cents >= coins[k]) {
+        await page.locator('#t-coins button', { hasText: labels[k] }).first().click();
+        cents -= coins[k];
+      }
+    }
+    await shot('09-ticket');
+    await page.click('#t-issue');
+    await run(400);
+    const sold = await page.evaluate(() => window.__bus.G.sim.trip.ticketsSold);
+    const errs = await page.evaluate(() => window.__bus.G.sim.trip.ticketErrors);
+    if (sold < 1 || errs !== 0) throw new Error(`ticket sale failed (sold ${sold}, errors ${errs})`);
+  });
+  await step('drive by keyboard', async () => {
+    // Finish boarding, then close the doors, release the parking brake, indicate and go.
+    await page.evaluate(() => {
+      const B = window.__bus;
+      const t = B.G.sim.trip;
+      for (let i = 0; i < 120 && (t.pendingSale || t.nextStop.waiting.length); i++) {
+        if (t.pendingSale) {
+          const r = t.pendingSale.request;
+          t.sellTicket(r.fare, r.price, Math.round((r.paid - r.price) * 100) / 100);
+        }
+        B.fastForward(1);
+      }
+      B.fastForward(Math.max(0, t.nextStop.sched - t.clock));
+    });
+    await page.keyboard.press('Space');
+    await page.evaluate(() => window.__bus.fastForward(4));
+    await page.keyboard.press('KeyP');
+    await page.keyboard.press('KeyQ');
+    await page.keyboard.down('KeyW');
+    await run(4000);
+    await page.keyboard.up('KeyW');
+    const s1 = await state();
+    await shot('10-keyboard-drive');
+    if (s1.kmh < 2) throw new Error(`bus did not move (${s1.kmh.toFixed(1)} km/h)`);
+    await page.keyboard.down('KeyS');
+    await run(3000);
+    await page.keyboard.up('KeyS');
+    const s2 = await state();
+    console.log(`    ${s1.kmh.toFixed(1)} km/h after gas, ${s2.kmh.toFixed(1)} km/h after braking, faults: ${JSON.stringify(s2.faults)}`);
+    if (s2.kmh >= s1.kmh) throw new Error('brake had no effect');
     await page.keyboard.press('Escape');
     await run(500);
-    await shot('09-pause');
+    await shot('11-pause');
   });
 } catch (e) {
   failed = true;

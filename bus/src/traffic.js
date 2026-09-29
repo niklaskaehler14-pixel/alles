@@ -239,6 +239,8 @@ export class Traffic {
     if (outList && outList.length && outList[0].s - outList[0].hl < v.hl * 2 + 3) return false;
     // The bus in the junction blocks every path it covers – with room for its swinging tail.
     if (env.busBoxes && this.#pathBlocked(mv.path, 0, mv.path.length, env.busBoxes, v.hw + (mv.turn === 'straight' ? 0.6 : 1.6))) return false;
+    // ... and so does the path the moving bus is about to take through it.
+    if (env.busFuture && this.#pathBlocked(mv.path, 0, mv.path.length, env.busFuture, v.hw + 0.3)) return false;
 
     // Give way: collect the cars we have to let pass.
     const yieldTo = [];
@@ -277,7 +279,9 @@ export class Traffic {
     // for is standing at the line too, the one that has waited longest goes.
     if (v.wait < 2) return false;
     for (const o of yieldTo) {
-      if (o.v > 0.4 || this.#tta(o) > 3.5) return false;
+      if (o.v > 0.4) return false;
+      // Standing further back in a queue: that car cannot come before the one at the line.
+      if (this.#tta(o) > 3.5) continue;
       if (o.wait > v.wait + 0.01 || (Math.abs(o.wait - v.wait) <= 0.01 && o.uid < v.uid)) return false;
     }
     return true;

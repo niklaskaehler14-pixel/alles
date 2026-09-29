@@ -161,12 +161,16 @@ export class Pedestrians {
         // Never walk into the bus.
         const nx = p.x + (dx / (d || 1)) * 0.8;
         const nz = p.z + (dz / (d || 1)) * 0.8;
-        const blocked = this.#blocked(nx, nz, busBoxes, env.vehicles, p.state === 'cross' ? 1.4 : 0.35);
+        // A car that stopped on the crossing for them does not hold people up for long:
+        // after a moment they walk around its bumper.
+        const blocked = this.#blocked(nx, nz, busBoxes, env.vehicles, p.state === 'cross' ? 1.4 : 0.35, busSpeed, (p.blockedT || 0) > 1.5);
         if (blocked) {
           speed = 0;
           p.moving = 0;
+          p.blockedT = (p.blockedT || 0) + dt;
         } else {
           p.moving = 1;
+          p.blockedT = 0;
         }
         if (d < 0.15) {
           if (p.state === 'toCurb') {
@@ -249,7 +253,7 @@ export class Pedestrians {
     for (let k = 1; k < 8; k++) {
       const x = a[0] + ((b[0] - a[0]) * k) / 8;
       const z = a[1] + ((b[1] - a[1]) * k) / 8;
-      if (this.#blocked(x, z, env.busBoxes || [], env.vehicles, 0.6)) return true;
+      if (this.#blocked(x, z, env.busBoxes || [], env.vehicles, 0.6, Math.abs(env.busSpeed || 0))) return true;
     }
     // A bus rolling in closer than it can comfortably stop: people wait a moment.
     if (env.busFrontX !== undefined && (env.busSpeed || 0) > 1.2) {
@@ -264,13 +268,17 @@ export class Pedestrians {
     return false;
   }
 
-  // Is (x, z) inside or right next to the bus or a car?
-  #blocked(x, z, busBoxes, vehicles, margin) {
-    for (const b of busBoxes) if (pointInBox(x, z, b, margin)) return true;
+  // Is (x, z) inside or right next to the bus or a car? Moving vehicles are kept at `margin`;
+  // past a vehicle that stands still (waiting for them) people walk closely.
+  #blocked(x, z, busBoxes, vehicles, margin, busSpeed = 0, ignoreStill = false) {
+    const still = Math.min(margin, 0.3);
+    const mb = busSpeed > 0.3 ? margin : still;
+    for (const b of busBoxes) if (pointInBox(x, z, b, mb)) return true;
     if (vehicles) {
       for (const v of vehicles) {
         if (Math.abs(v.x - x) > 7 || Math.abs(v.z - z) > 7) continue;
-        if (pointInBox(x, z, { x: v.x, z: v.z, yaw: v.yaw, hl: v.hl, hw: v.hw }, margin)) return true;
+        if (ignoreStill && v.v <= 0.5) continue;
+        if (pointInBox(x, z, { x: v.x, z: v.z, yaw: v.yaw, hl: v.hl, hw: v.hw }, v.v > 0.5 ? margin : still)) return true;
       }
     }
     return false;

@@ -70,19 +70,22 @@ export class Autopilot {
       if (j.kind === 'bend') this.bumps.push({ a: j.start - 20, b: j.start, c: j.end - 8, d: j.end + 12, off: -this.bendSwing });
       else this.bumps.push({ a: j.start - this.profile.swingA, b: j.start - this.profile.swingB, c: j.start + (j.end - j.start) * 0.7, d: j.end + 6, off: -this.swing, swing: true });
     }
-    for (const rs of r.stops) {
+    r.stops.forEach((rs, k) => {
       const s = rs.stop;
       const curb = s.curbOffset - half - 0.18;
       // Bays: follow the tapers (move over only once the curb recedes, pull out before the exit taper closes).
-      if (s.type === 'bay') this.bumps.push({ a: rs.dist - s.zone - 12, b: rs.dist - s.zone + 6, c: rs.dist + 0.5, d: rs.dist + 12, off: curb, stop: true });
-      else this.bumps.push({ a: rs.dist - 28, b: rs.dist - 10, c: rs.dist + 0.5, d: rs.dist + 14, off: curb, stop: true });
-    }
+      if (s.type === 'bay') this.bumps.push({ a: rs.dist - s.zone - 12, b: rs.dist - s.zone + 6, c: rs.dist + 0.5, d: rs.dist + 12, off: curb, stop: k });
+      else this.bumps.push({ a: rs.dist - 28, b: rs.dist - 10, c: rs.dist + 0.5, d: rs.dist + 14, off: curb, stop: k });
+    });
+    this.activeStops = new Set([0]);
   }
 
   offsetAt(s) {
     let off = 0;
     for (const b of this.bumps) {
       if (s <= b.a || s >= b.d) continue;
+      // Stops we pass without halting: stay in the lane.
+      if (b.stop !== undefined && !this.activeStops.has(b.stop)) continue;
       let w;
       if (s < b.b) w = smoothstep(b.a, b.b, s);
       else if (s <= b.c) w = 1;
@@ -101,6 +104,12 @@ export class Autopilot {
     const out = { throttle: 0, brake: 0, steer: 0 };
     const front = bus.frontPos();
     const prog = trip.progress;
+    // Which stops do we pull over for? The one we are serving or heading to (if needed).
+    trip.stops.forEach((st, k) => {
+      const needed = st.served || st.state === 'here' || (k === trip.current && !this.profile.skipStops && (st.waiting.length > 0 || trip.onboard.some((q) => q.to === k) || st.last));
+      if (needed) this.activeStops.add(k);
+      else if (st.state !== 'ahead' || k !== trip.current) this.activeStops.delete(k);
+    });
     // Get the bus ready: engine on, parking brake off, drive selected.
     if (!bus.engineOn && bus.starter <= 0) bus.setEngine(true);
     if (bus.parkingBrake) bus.setParkingBrake(false);
@@ -177,7 +186,14 @@ export class Autopilot {
       const node = this.city.nodes[jn.node];
       if (jn.control === 'signal' && !this.profile.ignoreSignals) {
         const s = signalState(node.signal, jn.signalGroup, env.t);
-        if (s === 'red' || s === 'redyellow' || (s === 'yellow' && d > (v * v) / (2 * 2.6))) lineDist = d;
+        if (s === 'yellow') {
+          // Decide once when the light turns yellow (no flip-flopping in the dilemma zone).
+          if (!this.yellow || this.yellow.node !== jn.node) this.yellow = { node: jn.node, go: d < (v * v) / (2 * 2.6) + 0.3 };
+          if (!this.yellow.go) lineDist = d;
+        } else {
+          this.yellow = null;
+          if (s === 'red' || s === 'redyellow') lineDist = d;
+        }
       } else if (jn.control === 'stop') {
         if (this.stoppedAtSign !== jn.node) {
           lineDist = d;
@@ -250,35 +266,56 @@ export class Autopilot {
   #clearToGo(jn, env) {
     const city = this.city;
     const node = city.nodes[jn.node];
-    const inLane = city.lanes[this.route.pieces.find((p) => p.kind === 'move' && p.start === jn.start).lane];
+    const move = this.route.pieces.find((p) => p.kind === 'move' && p.start === jn.start);
+    const inLane = city.lanes[move.lane];
     const traffic = env.traffic;
     if (!traffic) return true;
     // Swinging out into the other lane of the street we turn into takes a long bus a while.
-    const outEdge = city.lanes[city.movements[this.route.pieces.find((p) => p.kind === 'move' && p.start === jn.start).movement].outLane].edge;
-    const longGap = this.bus.spec.length > 15 ? 13 : 10;
+    const outEdge = city.lanes[city.movements[move.movement].outLane].edge;
+    const longGap = this.bus.spec.length > 15 ? 16 : 13;
+    const approaches = city.lanes.filter((l) => l.to === node.id && l.id !== inLane.id);
     for (const v of traffic.vehicles) {
       // Cars standing still for a while are waiting (possibly for us): they don't block.
       if (v.v < 0.3 && v.wait > 2) continue;
       if (v.kind === 1 && city.movements[v.id].node === node.id) return false; // somebody inside
-      if (v.kind !== 0) continue;
-      const lane = city.lanes[v.id];
-      if (lane.to !== node.id || lane.id === inLane.id) continue;
-      const tta = (lane.path.length - v.s - v.hl) / Math.max(v.v, 0.8);
-      if (jn.turn === 'right' && lane.edge === outEdge && (jn.control === 'yield' || jn.control === 'stop') && tta < longGap) return false;
-      // A long bus turning at walking pace needs a bigger gap.
-      const window = jn.turn === 'straight' ? 7 : this.bus.spec.length > 15 ? 13 : 9;
-      if (tta > window) continue;
-      if (jn.control === 'yield' || jn.control === 'stop') {
-        if (lane.endControl === 'major') return false;
-      } else if (jn.control === 'rbl') {
-        if (lane.dir === leftOf(inLane.dir)) return false;
-      }
-      if (jn.turn === 'left' && lane.dir === opposite(inLane.dir)) {
-        const mv = city.movements[v.next];
-        if (mv && mv.turn !== 'left') return false;
+      for (const lane of approaches) {
+        const d = this.#approachDist(v, lane);
+        if (d === null) continue;
+        const tta = d / Math.max(v.v, 0.8);
+        if (jn.turn === 'right' && lane.edge === outEdge && (jn.control === 'yield' || jn.control === 'stop') && tta < longGap) return false;
+        // A long bus turning at walking pace needs a bigger gap.
+        const window = jn.turn === 'straight' ? 7 : this.bus.spec.length > 15 ? 13 : 9;
+        if (tta > window) continue;
+        if (jn.control === 'yield' || jn.control === 'stop') {
+          if (lane.endControl === 'major') return false;
+        } else if (jn.control === 'rbl') {
+          if (lane.dir === leftOf(inLane.dir)) return false;
+        }
+        if (jn.turn === 'left' && lane.dir === opposite(inLane.dir)) {
+          const mv = v.kind === 0 && v.id === lane.id ? city.movements[v.next] : null;
+          if (!mv || mv.turn !== 'left') return false;
+        }
       }
     }
     return true;
+  }
+
+  // How far a vehicle still is from the stop line at the end of `lane` (null if it is not
+  // coming that way). Cars further back on the same straight street count too, so a fast
+  // car one block away is seen before the bus starts a slow turn in front of it.
+  #approachDist(v, lane) {
+    if (v.kind === 0) {
+      if (v.id === lane.id) return lane.path.length - v.s - v.hl;
+      if (this.city.lanes[v.id].to === lane.to) return null; // on another approach
+    }
+    const end = lane.path.at(lane.path.length, this.tmpEnd || (this.tmpEnd = {}));
+    const rx = v.x - end.x;
+    const rz = v.z - end.z;
+    const along = -(rx * end.dx + rz * end.dz);
+    if (along < lane.path.length || along > 240) return null;
+    if (Math.abs(rx * end.dz - rz * end.dx) > 2.6) return null;
+    if (Math.sin(v.yaw) * end.dx + Math.cos(v.yaw) * end.dz < 0.8) return null;
+    return along - v.hl;
   }
 
   #leftTurnHold(env, prog) {
@@ -292,6 +329,8 @@ export class Autopilot {
         if (v.crashed > 0) continue;
         if (v.kind === 1) {
           const mv = city.movements[v.id];
+          // A car stuck inside the junction for a while is left to the obstacle check.
+          if (v.v < 0.3 && v.wait > 4) continue;
           if (mv.inLane === c.incoming && mv.turn !== 'left') return c.at - 1 - prog;
         } else if (v.id === c.incoming) {
           const lane = city.lanes[v.id];

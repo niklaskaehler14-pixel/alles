@@ -7,7 +7,9 @@
     "test:browser": "node tests/e2e.mjs",
     "build": "node tools/build-artifact.mjs",
     "serve": "npx http-server -c-1 -p 8080 .",
-    "test:bus": "node tests/bus-physics.test.mjs && node tests/bus-rules.test.mjs && node tests/bus-trips.test.mjs"
+    "test:bus": "node tests/bus-physics.test.mjs && node tests/bus-rules.test.mjs && node tests/bus-trips.test.mjs",
+    "test:bus:browser": "node tests/bus-e2e.mjs",
+    "build:bus": "node bus/tools/build-artifact.mjs"
   },
   "repository": {
     "type": "git",

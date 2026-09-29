@@ -220,6 +220,7 @@ export class Simulation {
     this.busStopped = Math.abs(bus.u) < 0.2 ? (this.busStopped || 0) + sdt : 0;
     this.traffic.update(sdt, this.clock, {
       busBoxes,
+      busFuture: this.#futureBoxes(),
       yieldBoxes,
       busApproach,
       busStopped: this.busStopped,
@@ -245,6 +246,9 @@ export class Simulation {
 
     let inStopZone = false;
     if (this.trip && !this.trip.finished) {
+      // Left indicator set at any time while standing at (or pulling out of) the stop.
+      const here = this.trip.nextStop;
+      if (here && here.state === 'here' && this.indicator === 1 && !this.hazard) this.departSignal = true;
       this.trip.update(sdt, {});
       inStopZone = this.trip.inStopZone;
       for (const e of this.trip.drainEvents()) {
@@ -254,6 +258,7 @@ export class Simulation {
           continue;
         }
         if (e.type === 'depart' && e.stop && !e.stop.last && e.stop.served) this.#checkDepartIndicator();
+        if (e.type === 'depart' || e.type === 'arrive') this.departSignal = false;
         this.events.push(e);
       }
     } else if (!this.trip) {
@@ -284,6 +289,25 @@ export class Simulation {
     for (const e of this.rules.drainEvents()) this.events.push({ type: 'fault', fault: e });
   }
 
+  // Where the moving bus will be in the next seconds (along its line route): cars must not
+  // start into a junction across that path. A bus standing still (e.g. waiting for a gap)
+  // projects nothing, so the cars it waits for can go.
+  #futureBoxes() {
+    const bus = this.bus;
+    if (!this.route || !this.trip || bus.u < 1) return null;
+    const out = [];
+    const p = {};
+    const reach = Math.min(30, 6 + bus.u * 4);
+    for (let d = 2; d <= reach; d += 3) {
+      const s = this.trip.progress + d;
+      this.route.path.at(s, p);
+      // In a turn the body sweeps well beyond the line (swinging out, tail).
+      const turning = Math.abs(this.route.path.curvature(s, 3)) > 0.02;
+      out.push({ x: p.x, z: p.z, yaw: p.yaw, hl: 1.6, hw: this.spec.width / 2 + (turning ? 2.2 : 0.4) });
+    }
+    return out;
+  }
+
   // Lane stretch the bus will pull into when leaving the stop it stands at (or none).
   #pullOutBox(front) {
     let stop = null;
@@ -304,8 +328,7 @@ export class Simulation {
 
   #checkDepartIndicator() {
     const h = this.rules.indicatorHistory;
-    const since = this.clock - 14;
-    const ok = h.some(([t, v]) => t >= since && v === 1);
+    const ok = this.departSignal || h.some(([t, v]) => t >= this.clock - 14 && v === 1);
     if (!ok) this.rules.add('noIndicatorDepart', { time: this.clock, cooldown: 1 });
   }
 

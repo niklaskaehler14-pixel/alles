@@ -1,5 +1,7 @@
 # Nordkamm GT
 
+> Ebenfalls in diesem Repository: **[Nordkamm Linienbus](bus/README.md)**, ein 3D-Linienbus-Simulator mit Fahrgästen, Fahrkartenverkauf, Fahrplan, Verkehrsregeln und eigenem Busbetrieb (Ordner `bus/`).
+
 3D-Rennspiel mit offener Welt, das direkt im Browser läuft. Es braucht keine Installation und lädt keine Bilddateien, denn Welt, Texturen und Sounds werden beim Start berechnet.
 
 Gefahren wird auf dem **Seeufer-Ring**, einem 8,1 km langen Rundkurs, und in einer 4 × 4 km großen offenen Welt im Stil moderner Open-World-Rennspiele. Die Welt hat ein Straßennetz von gut 16 km:

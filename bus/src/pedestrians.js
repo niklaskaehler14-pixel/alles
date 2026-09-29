@@ -244,12 +244,22 @@ export class Pedestrians {
     while (this.list.length < this.count && guard++ < 10) this.#spawn(bx, bz, 150, 300);
   }
 
-  // Any vehicle standing on the straight line between the two waiting points?
+  // Any vehicle on the crossing, or the bus about to drive over it?
   #crossingOccupied(a, b, env) {
     for (let k = 1; k < 8; k++) {
       const x = a[0] + ((b[0] - a[0]) * k) / 8;
       const z = a[1] + ((b[1] - a[1]) * k) / 8;
       if (this.#blocked(x, z, env.busBoxes || [], env.vehicles, 0.6)) return true;
+    }
+    // A bus rolling in closer than it can comfortably stop: people wait a moment.
+    if (env.busFrontX !== undefined && (env.busSpeed || 0) > 1.2) {
+      const v = env.busSpeed;
+      const reach = (v * v) / (2 * 1.5) + 8;
+      for (let k = 0; k <= 8; k++) {
+        const x = a[0] + ((b[0] - a[0]) * k) / 8;
+        const z = a[1] + ((b[1] - a[1]) * k) / 8;
+        if (Math.hypot(x - env.busFrontX, z - env.busFrontZ) < reach) return true;
+      }
     }
     return false;
   }

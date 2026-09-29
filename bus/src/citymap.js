@@ -132,6 +132,9 @@ export function buildCity() {
       n.kind = n.degree === 4 ? 'cross' : 'tee';
     }
     n.trim = n.kind === 'straight' ? ROAD.straightTrim : n.kind === 'bend' ? ROAD.bendTrim : ROAD.junctionTrim;
+    // Curb radius around this node's corners: wide sweeping bends, tighter junction corners.
+    n.radius = n.kind === 'bend' ? ROAD.bendRadius : R;
+    n.hr = H + n.radius;
     // Junction control. majorAxis: 'h' (east–west has priority) or 'v'.
     if (n.kind === 'cross' || n.kind === 'tee') {
       if (signalSet.has(n.key)) n.control = 'signal';
@@ -249,6 +252,7 @@ export function buildCity() {
         const s = inL.path.at(inL.path.length);
         const e = outL.path.at(0);
         let pts;
+        let radius = Infinity;
         if (turn === 'straight') {
           pts = [s.x, s.z, e.x, e.z];
         } else {
@@ -257,16 +261,18 @@ export function buildCity() {
           const [rix, riz] = DIRS[rightOf(dIn)];
           const [rmx, rmz] = DIRS[rightOf(m)];
           const lo2 = ROAD.laneOffset;
-          const t1x = n.x + kx * HR + rix * lo2;
-          const t1z = n.z + kz * HR + riz * lo2;
-          const t2x = n.x + mx * HR + rmx * lo2;
-          const t2z = n.z + mz * HR + rmz * lo2;
-          const cx = n.x + HR * (kx + mx);
-          const cz = n.z + HR * (kz + mz);
+          const hr = n.hr;
+          const t1x = n.x + kx * hr + rix * lo2;
+          const t1z = n.z + kz * hr + riz * lo2;
+          const t2x = n.x + mx * hr + rmx * lo2;
+          const t2z = n.z + mz * hr + rmz * lo2;
+          const cx = n.x + hr * (kx + mx);
+          const cz = n.z + hr * (kz + mz);
           const rad = Math.hypot(t1x - cx, t1z - cz);
           const a0 = Math.atan2(t1x - cx, t1z - cz);
           const a1 = a0 + (turn === 'left' ? Math.PI / 2 : -Math.PI / 2);
           pts = joinPoints([s.x, s.z, t1x, t1z], arcPoints(cx, cz, rad, a0, a1, 0.75), [t2x, t2z, e.x, e.z]);
+          radius = rad;
           const end = arcPoints(cx, cz, rad, a1, a1, 1);
           if (Math.hypot(end[0] - t2x, end[1] - t2z) > 1e-6) throw new Error(`turn geometry mismatch at ${n.key}`);
         }
@@ -276,6 +282,7 @@ export function buildCity() {
           inLane: li,
           outLane: lo,
           turn,
+          radius,
           path: new Path(pts),
           conflicts: new Set(),
         };
@@ -626,9 +633,10 @@ function offsetLoop(loop, inset, bays, bayShrink, noBays = false) {
     const convex = c.dOut === leftOf(c.dIn);
     if (!convex && c.dOut !== rightOf(c.dIn)) throw new Error('loop reverses direction');
     if (convex) {
-      const cx = nx + HR * (L1[0] + L2[0]);
-      const cz = nz + HR * (L1[1] + L2[1]);
-      const rad = HR - inset;
+      const hr = c.node.hr;
+      const cx = nx + hr * (L1[0] + L2[0]);
+      const cz = nz + hr * (L1[1] + L2[1]);
+      const rad = hr - inset;
       if (rad < 0.4) {
         const px = nx + inset * (L1[0] + L2[0]);
         const pz = nz + inset * (L1[1] + L2[1]);
@@ -638,9 +646,10 @@ function offsetLoop(loop, inset, bays, bayShrink, noBays = false) {
       const arc = arcPoints(cx, cz, rad, a0, a0 + Math.PI / 2, 1.2);
       return { p1: arc.slice(0, 2), p2: arc.slice(-2), arc };
     }
-    const cx = nx - HR * (L1[0] + L2[0]);
-    const cz = nz - HR * (L1[1] + L2[1]);
-    const rad = HR + inset;
+    const hr = c.node.hr;
+    const cx = nx - hr * (L1[0] + L2[0]);
+    const cz = nz - hr * (L1[1] + L2[1]);
+    const rad = hr + inset;
     const a0 = Math.atan2(L1[0], L1[1]);
     const arc = arcPoints(cx, cz, rad, a0, a0 - Math.PI / 2, 1.2);
     return { p1: arc.slice(0, 2), p2: arc.slice(-2), arc };

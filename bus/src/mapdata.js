@@ -80,7 +80,7 @@ export const STOPS = [
   { id: 'galerie-w', name: 'Stadtgalerie', axis: 'h', line: 2, dir: 'W', front: 60, type: 'kerb', demand: 1.2 },
   { id: 'park-e', name: 'Stadtpark', axis: 'h', line: 3, dir: 'E', front: 300, type: 'bay', demand: 0.9 },
   { id: 'park-w', name: 'Stadtpark', axis: 'h', line: 3, dir: 'W', front: 225, type: 'kerb', demand: 0.9 },
-  { id: 'klinikum-s', name: 'Klinikum', axis: 'v', line: 7, dir: 'S', front: 300, type: 'bay', demand: 1.3 },
+  { id: 'klinikum-s', name: 'Klinikum', axis: 'v', line: 7, dir: 'S', front: 284, type: 'bay', demand: 1.3 },
   { id: 'klinikum-n', name: 'Klinikum', axis: 'v', line: 7, dir: 'N', front: 245, type: 'kerb', demand: 1.3 },
   { id: 'buerger-w', name: 'Bürgerhaus', axis: 'h', line: 0, dir: 'W', front: -230, type: 'kerb', demand: 0.7 },
   { id: 'buerger-e', name: 'Bürgerhaus', axis: 'h', line: 0, dir: 'E', front: -360, type: 'kerb', demand: 0.7 },

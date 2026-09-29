@@ -182,9 +182,12 @@ export class RuleMonitor {
     }
     // ---- pedestrians on crossings
     const boxes = bus.boxes();
+    // Front 3 m of the bus: a pedestrian within 1.2 m of it is endangered; along the sides 0.5 m.
+    const b0 = boxes[0];
+    const fb = { x: b0.x + Math.sin(b0.yaw) * (b0.hl - 1.5), z: b0.z + Math.cos(b0.yaw) * (b0.hl - 1.5), yaw: b0.yaw, hl: 1.5, hw: b0.hw };
     for (const p of ctx.crossingPeds || []) {
-      let near = false;
-      for (const b of boxes) if (pointInBox(p.x, p.z, b, 1.1)) near = true;
+      let near = pointInBox(p.x, p.z, fb, 1.2);
+      for (const b of boxes) if (pointInBox(p.x, p.z, b, 0.5)) near = true;
       if (!near || Math.abs(bus.u) < 0.8) continue;
       const c = city.crossings[p.crossing];
       if (c && c.kind === 'zebra') this.add('zebra', { time: now, cooldown: 8, x: p.x, z: p.z });

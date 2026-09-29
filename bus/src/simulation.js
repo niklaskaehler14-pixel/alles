@@ -150,25 +150,37 @@ export class Simulation {
     let carHit = false;
     this.carHitCool = Math.max(0, this.carHitCool - dt);
     const boxes = bus.boxes();
+    const bsn = Math.sin(bus.yaw);
+    const bcs = Math.cos(bus.yaw);
     for (const v of this.traffic.vehicles) {
       if (Math.abs(v.x - bus.x) > 25 || Math.abs(v.z - bus.z) > 25) continue;
       const vb = { x: v.x, z: v.z, yaw: v.yaw, hl: v.hl, hw: v.hw };
       for (const b of boxes) {
         const hit = boxOverlap(b, vb);
         if (!hit) continue;
+        // Who drove into whom? Closing speed of the bus towards the car vs. the car towards the bus.
+        const busTowards = -(bsn * bus.u * hit.nx + bcs * bus.u * hit.nz);
+        const carTowards = Math.sin(v.yaw) * v.v * hit.nx + Math.cos(v.yaw) * v.v * hit.nz;
+        const busFault = busTowards > 0.5 && busTowards >= carTowards;
         const d = Math.min(hit.depth, 0.5);
-        bus.x += hit.nx * d;
-        bus.z += hit.nz * d;
-        const rel = Math.abs(bus.u - v.v);
+        if (busFault) {
+          bus.x += hit.nx * d;
+          bus.z += hit.nz * d;
+          bus.u *= 0.8;
+        } else {
+          // The car ran into the bus: it stops, the bus stays where it is.
+          v.s = Math.max(0, v.s - d);
+          v.v = 0;
+        }
+        const rel = Math.max(busTowards, carTowards);
         if (rel > 0.6 && v.crashed <= 0) {
           this.traffic.crash(v);
-          if (this.carHitCool <= 0) {
+          this.events.push({ type: 'crash', speed: rel, busFault });
+          if (busFault && this.carHitCool <= 0) {
             carHit = true;
             this.carHitCool = 3;
-            this.events.push({ type: 'crash', speed: rel });
           }
         }
-        bus.u *= 0.8;
       }
     }
 
@@ -191,9 +203,24 @@ export class Simulation {
     // A bus leaving a stop with the left indicator on gets let out (§ 20 Abs. 5 StVO):
     // cars coming from behind wait before the lane stretch next to the bus.
     const yieldBoxes = this.indicator === 1 && Math.abs(bus.u) < 3 ? this.#pullOutBox(f) : [];
+    // Where the bus is heading (so cars at junctions give way to it when they have to).
+    let busApproach = null;
+    const bq = bus.u > 0.3 ? this.city.laneAt(f[0], f[1], bus.yaw, 3.2) : null;
+    if (bq) {
+      let turn = null;
+      if (this.route && this.trip) {
+        const j = this.route.junctions.find((jj) => jj.start > this.trip.progress - 1);
+        if (j) turn = j.turn;
+      }
+      busApproach = { lane: bq.lane.id, tta: (bq.lane.path.length - bq.s) / Math.max(bus.u, 0.8), turn };
+    }
+    this.busStopped = Math.abs(bus.u) < 0.2 ? (this.busStopped || 0) + sdt : 0;
     this.traffic.update(sdt, this.clock, {
       busBoxes,
       yieldBoxes,
+      busApproach,
+      busStopped: this.busStopped,
+      busYaw: bus.yaw,
       busX: bus.x,
       busZ: bus.z,
       busSpeedAlong: (dx, dz) => (bs * dx + bc * dz) * bus.u,
@@ -209,6 +236,7 @@ export class Simulation {
       busYaw: bus.yaw,
       vehicles: this.traffic.vehicles,
     });
+    this.lastCrossingPeds = crossing;
     const trafficEvents = this.traffic.drainEvents();
     const pedEvents = this.peds.drainEvents();
 
@@ -217,7 +245,11 @@ export class Simulation {
       this.trip.update(sdt, {});
       inStopZone = this.trip.inStopZone;
       for (const e of this.trip.drainEvents()) {
-        if (e.type === 'fault') this.rules.add(e.code, { time: this.clock, cooldown: 1, detail: e.detail });
+        if (e.type === 'fault') {
+          // Re-emitted by the rule monitor below.
+          this.rules.add(e.code, { time: this.clock, cooldown: 1, detail: e.detail });
+          continue;
+        }
         if (e.type === 'depart' && e.stop && !e.stop.last && e.stop.served) this.#checkDepartIndicator();
         this.events.push(e);
       }

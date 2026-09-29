@@ -11,13 +11,14 @@ export const ROAD = {
   // Stop lines are set back behind the curb arcs (as on bus routes), so a bus turning right
   // can swing out without touching cars waiting in the other lane.
   stopLineGap: 6,
+  bendRadius: 32, // curb radius where a street simply bends (corners of the ring road)
   bayDepth: 3,
   bayTaperIn: 12,
   bayTaperOut: 9,
 };
 // Distance from a junction centre to the stop line / lane ends.
 ROAD.junctionTrim = ROAD.half + ROAD.cornerRadius + ROAD.stopLineGap; // 18.75
-ROAD.bendTrim = ROAD.half + ROAD.cornerRadius; // 12.75
+ROAD.bendTrim = ROAD.half + ROAD.bendRadius; // 35.75
 ROAD.straightTrim = 1;
 ROAD.crossingCentre = ROAD.half + 4; // pedestrian crossing centre line from the junction centre
 ROAD.crossingWidth = 4;

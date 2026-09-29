@@ -7,20 +7,56 @@ import { clamp, wrapAngle, smoothstep, pointInBox } from './util.js';
 import { FARES, roundCents } from './tickets.js';
 
 // How far the bus swings out before a right turn so the rear wheels clear the curb.
-const SWING = { solo: 1.35, electric: 1.35, midi: 0.7, articulated: 2.2 };
+const SWING = { solo: 1.35, electric: 1.35, midi: 0.9, articulated: 2.5 };
+// Wide bends of the ring road: a little room is enough, the bus stays in its lane.
+const BEND_SWING = { solo: 0.35, electric: 0.35, midi: 0.2, articulated: 0.55 };
 
 export class Autopilot {
-  constructor(city, route, bus) {
+  constructor(city, route, bus, profile = {}) {
+    // Swing out over the last ~10 m before the stop line (after checking the oncoming lane).
+    this.profile = { swingA: 10, swingB: -1, ...profile };
     this.city = city;
     this.route = route;
     this.bus = bus;
     this.swing = SWING[bus.spec.id] ?? 1.35;
+    this.bendSwing = BEND_SWING[bus.spec.id] ?? 0.35;
     this.indicator = 0;
     this.state = 'drive';
     this.timer = 0;
     this.stoppedAtSign = null;
     this.saleTimer = 0;
     this.buildOffsets();
+    this.buildCommitPoints();
+  }
+
+  // Left turns: the route distance at which the bus front would enter the oncoming lane.
+  // Up to there it may pull into the junction and wait for a gap.
+  buildCommitPoints() {
+    const city = this.city;
+    const r = this.route;
+    this.commit = new Map();
+    for (const j of r.junctions) {
+      if (j.turn !== 'left') continue;
+      const pc = r.pieces.find((p) => p.kind === 'move' && p.start === j.start);
+      const inLane = city.lanes[pc.lane];
+      const node = city.nodes[j.node];
+      const incoming = node.inLanes.map((id) => city.lanes[id]).find((l) => l.dir === (inLane.dir + 2) % 4);
+      let at = j.end;
+      if (incoming) {
+        const paths = incoming.movements.map((id) => city.movements[id]).filter((m) => m.turn !== 'left').map((m) => m.path);
+        const q = {};
+        for (let s = j.start; s < j.end; s += 0.5) {
+          r.path.at(s, q);
+          const lx = q.x + q.dz * 1.6;
+          const lz = q.z - q.dx * 1.6;
+          if (paths.some((p) => p.nearest(lx, lz).d < 1.3)) {
+            at = s;
+            break;
+          }
+        }
+      }
+      this.commit.set(j.node, { at, incoming: incoming ? incoming.id : -1 });
+    }
   }
 
   // Lateral target offset (+ = right of the lane centre) along the route.
@@ -31,7 +67,8 @@ export class Autopilot {
     for (const j of r.junctions) {
       if (j.turn !== 'right') continue;
       // Swing out before the corner, come back into the own lane from the middle of the arc on.
-      this.bumps.push({ a: j.start - 22, b: j.start - 4, c: j.start + (j.end - j.start) * 0.7, d: j.end + 6, off: -this.swing });
+      if (j.kind === 'bend') this.bumps.push({ a: j.start - 20, b: j.start, c: j.end - 8, d: j.end + 12, off: -this.bendSwing });
+      else this.bumps.push({ a: j.start - this.profile.swingA, b: j.start - this.profile.swingB, c: j.start + (j.end - j.start) * 0.7, d: j.end + 6, off: -this.swing, swing: true });
     }
     for (const rs of r.stops) {
       const s = rs.stop;
@@ -50,7 +87,8 @@ export class Autopilot {
       if (s < b.b) w = smoothstep(b.a, b.b, s);
       else if (s <= b.c) w = 1;
       else w = 1 - smoothstep(b.c, b.d, s);
-      if (Math.abs(b.off * w) > Math.abs(off)) off = b.off * w;
+      const o = b.off * w;
+      if (Math.abs(o) > Math.abs(off)) off = o;
     }
     return off;
   }
@@ -88,21 +126,35 @@ export class Autopilot {
     const delta = headErr + Math.atan2(-2.4 * e, v + 0.8);
     out.steer = clamp(delta / bus.spec.steerMax, -1, 1);
 
-    // ---- speed planning
-    let vt = this.#laneLimit(prog) / 3.6 - 0.8;
+    // ---- speed planning: current limit and lower limits coming up (brake before the zone sign)
+    let vt = this.#laneLimit(prog) / 3.6 - 0.8 + (this.profile.speedExcess ?? 0) / 3.6;
+    for (const pc of route.pieces) {
+      if (pc.start + pc.length < prog || pc.start - prog > 90) continue;
+      const lim = this.#pieceLimit(pc) / 3.6 - 0.8;
+      const d = pc.start - prog;
+      if (d > 0) vt = Math.min(vt, Math.sqrt(lim * lim + 2 * 0.8 * Math.max(0, d - 2)));
+    }
     // Curves ahead (bends, turns) within 60 m.
     for (let d = 0; d < 60; d += 3) {
       const kk = Math.abs(route.path.curvature(prog + d, 3));
       if (kk < 0.005) continue;
       let vc = Math.sqrt(1.1 / kk);
-      if (route.path.curvature(prog + d, 3) < 0) vc = Math.min(vc, 14 / 3.6);
+      if (route.path.curvature(prog + d, 3) < 0 && kk > 1 / 20) vc = Math.min(vc, 14 / 3.6);
       vt = Math.min(vt, Math.sqrt(vc * vc + 2 * 0.9 * Math.max(0, d - 4)));
+    }
+    // Junctions without lights where we have to give way: approach slowly and look.
+    for (const j of route.junctions) {
+      if (j.control !== 'yield' && j.control !== 'rbl' && j.control !== 'stop') continue;
+      const d0 = j.start - 25 - prog;
+      if (prog > j.start + 2 || d0 > 60) continue;
+      const vcap = (j.control === 'rbl' ? 14 : 18) / 3.6;
+      vt = Math.min(vt, d0 <= 0 ? vcap : Math.sqrt(vcap * vcap + 2 * 0.9 * d0));
     }
     // Right turns at junctions: walking pace (§ 9 Abs. 6 StVO) until the bus has straightened out.
     for (const j of route.junctions) {
       if (j.turn !== 'right' || (j.kind !== 'cross' && j.kind !== 'tee')) continue;
       if (prog > j.end + 9 || j.start - prog > 70) continue;
-      const vcap = 9 / 3.6;
+      const vcap = (this.profile.rightTurnKmh ?? 9) / 3.6;
       const d0 = j.start - 3 - prog;
       vt = Math.min(vt, d0 <= 0 ? vcap : Math.sqrt(vcap * vcap + 2 * 0.9 * d0));
     }
@@ -111,7 +163,7 @@ export class Autopilot {
     let stopDist = Infinity;
     if (st && st.state === 'ahead') {
       const needed = st.waiting.length > 0 || trip.onboard.some((q) => q.to === trip.current) || st.last;
-      if (needed) stopDist = st.dist - prog - 0.3;
+      if (needed && !this.profile.skipStops) stopDist = st.dist - prog - 0.3;
     }
     // Junction controls ahead.
     const jn = route.junctions.find((j) => j.start > prog - 1 && j.start - prog < 90);
@@ -119,7 +171,7 @@ export class Autopilot {
     if (jn) {
       const d = jn.start - prog - 0.8;
       const node = this.city.nodes[jn.node];
-      if (jn.control === 'signal') {
+      if (jn.control === 'signal' && !this.profile.ignoreSignals) {
         const s = signalState(node.signal, jn.signalGroup, env.t);
         if (s === 'red' || s === 'redyellow' || (s === 'yellow' && d > (v * v) / (2 * 2.6))) lineDist = d;
       } else if (jn.control === 'stop') {
@@ -132,9 +184,19 @@ export class Autopilot {
       } else if (jn.turn === 'left' && d < 18 && !this.#clearToGo(jn, env)) lineDist = d;
       if (jn.kind === 'bend') lineDist = Infinity;
     }
+    // Left turn: wait inside the junction before the oncoming lane until there is a gap.
+    const leftHold = this.#leftTurnHold(env, prog);
+    if (leftHold < lineDist) lineDist = leftHold;
+    // Right turn ahead: only swing out into the other lane once oncoming cars are through.
+    const swingHold = this.#oncomingBeforeSwing(env, prog);
+    if (swingHold < lineDist) lineDist = swingHold;
+    // Turning: let pedestrians on (or waiting at) the crossing of the street we turn into go first.
+    const pedStop = this.#crossingAhead(env, prog);
+    if (pedStop < lineDist) lineDist = pedStop;
     // Traffic and pedestrians on the path ahead.
     const obstacle = this.#obstacle(env, prog);
     const target = Math.min(stopDist, lineDist, obstacle);
+
     if (target < Infinity) vt = Math.min(vt, Math.sqrt(2 * 0.95 * Math.max(0, target)) * (target < 1.2 ? 0.4 : 1));
     if (target < 0.4) vt = 0;
 
@@ -148,6 +210,7 @@ export class Autopilot {
     if (turnAhead) this.indicator = turnAhead.turn === 'left' ? 1 : -1;
     if (stopDist < 70 && this.state === 'drive') this.indicator = -1;
     if (this.state === 'depart' || (this.departing && this.departing > 0)) this.indicator = 1;
+    if (this.profile.noIndicator) this.indicator = 0;
 
     // ---- pedals: speed controller
     if (this.state === 'drive') {
@@ -166,10 +229,15 @@ export class Autopilot {
     return out;
   }
 
+  #pieceLimit(pc) {
+    if (pc.kind === 'lane') return pc.speed;
+    const mv = this.city.movements[pc.movement];
+    return Math.min(this.city.lanes[mv.inLane].speed, this.city.lanes[mv.outLane].speed);
+  }
+
   #laneLimit(prog) {
-    const r = this.route;
-    for (const pc of r.pieces) {
-      if (prog >= pc.start && prog < pc.start + pc.length) return pc.kind === 'lane' ? pc.speed : 50;
+    for (const pc of this.route.pieces) {
+      if (prog >= pc.start && prog < pc.start + pc.length) return this.#pieceLimit(pc);
     }
     return 50;
   }
@@ -181,6 +249,9 @@ export class Autopilot {
     const inLane = city.lanes[this.route.pieces.find((p) => p.kind === 'move' && p.start === jn.start).lane];
     const traffic = env.traffic;
     if (!traffic) return true;
+    // Swinging out into the other lane of the street we turn into takes a long bus a while.
+    const outEdge = city.lanes[city.movements[this.route.pieces.find((p) => p.kind === 'move' && p.start === jn.start).movement].outLane].edge;
+    const longGap = this.bus.spec.length > 15 ? 13 : 10;
     for (const v of traffic.vehicles) {
       // Cars standing still for a while are waiting (possibly for us): they don't block.
       if (v.v < 0.3 && v.wait > 2) continue;
@@ -189,7 +260,10 @@ export class Autopilot {
       const lane = city.lanes[v.id];
       if (lane.to !== node.id || lane.id === inLane.id) continue;
       const tta = (lane.path.length - v.s - v.hl) / Math.max(v.v, 0.8);
-      if (tta > 6) continue;
+      if (jn.turn === 'right' && lane.edge === outEdge && (jn.control === 'yield' || jn.control === 'stop') && tta < longGap) return false;
+      // A long bus turning at walking pace needs a bigger gap.
+      const window = jn.turn === 'straight' ? 7 : this.bus.spec.length > 15 ? 13 : 9;
+      if (tta > window) continue;
       if (jn.control === 'yield' || jn.control === 'stop') {
         if (lane.endControl === 'major') return false;
       } else if (jn.control === 'rbl') {
@@ -203,12 +277,95 @@ export class Autopilot {
     return true;
   }
 
+  #leftTurnHold(env, prog) {
+    if (!env.traffic) return Infinity;
+    const city = this.city;
+    for (const j of this.route.junctions) {
+      if (j.turn !== 'left' || prog < j.start - 1 || prog > j.end) continue;
+      const c = this.commit.get(j.node);
+      if (!c || c.incoming < 0 || prog > c.at - 0.5) continue;
+      for (const v of env.traffic.vehicles) {
+        if (v.crashed > 0) continue;
+        if (v.kind === 1) {
+          const mv = city.movements[v.id];
+          if (mv.inLane === c.incoming && mv.turn !== 'left') return c.at - 1 - prog;
+        } else if (v.id === c.incoming) {
+          const lane = city.lanes[v.id];
+          if (city.movements[v.next].turn === 'left') continue;
+          const d = lane.path.length - v.s - v.hl;
+          if (v.v > 0.5 && d / v.v < 6) return c.at - 1 - prog;
+          if (v.v <= 0.5 && d < 3 && v.wait < 1.5) return c.at - 1 - prog; // about to start
+        }
+      }
+    }
+    return Infinity;
+  }
+
+  #oncomingBeforeSwing(env, prog) {
+    if (!env.traffic) return Infinity;
+    const city = this.city;
+    for (const j of this.route.junctions) {
+      if (j.turn !== 'right' || j.kind === 'bend') continue;
+      const swingStart = j.start - this.profile.swingA;
+      if (prog > swingStart + 1 || swingStart - prog > 40) continue;
+      const inLane = city.lanes[j.control !== undefined ? this.route.pieces.find((p) => p.kind === 'move' && p.start === j.start).lane : 0];
+      const opp = city.lanes[city.edges[inLane.edge].lanes.find((id) => id !== inLane.id)];
+      const f = this.bus.frontPos();
+      const qs = opp.path.nearest(f[0], f[1]).s;
+      const node = city.nodes[j.node];
+      for (const v of env.traffic.vehicles) {
+        if (v.crashed > 0) continue;
+        let coming = (v.kind === 0 && v.id === opp.id && v.s - v.hl < qs + 2) || (v.kind === 1 && city.movements[v.id].outLane === opp.id);
+        // ... or about to drive through the junction into that lane.
+        if (!coming && v.kind === 0) {
+          const lane = city.lanes[v.id];
+          if (lane.to === node.id && city.movements[v.next].outLane === opp.id) {
+            const d = lane.path.length - v.s - v.hl;
+            coming = d / Math.max(v.v, 0.5) < 9 && (v.v > 0.5 || d < 4);
+          }
+        }
+        if (coming) return swingStart - 1 - prog;
+      }
+    }
+    return Infinity;
+  }
+
+  #crossingAhead(env, prog) {
+    const city = this.city;
+    const peds = env.pedestrians || [];
+    if (!peds.length) return Infinity;
+    let best = Infinity;
+    for (const j of this.route.junctions) {
+      if (j.turn === 'straight' || j.end < prog - 2 || j.start - prog > 45) continue;
+      const pc = this.route.pieces.find((p) => p.kind === 'move' && p.start === j.start);
+      const outEdge = city.lanes[city.movements[pc.movement].outLane].edge;
+      for (const c of city.crossings) {
+        if (c.node !== j.node || c.edge !== outEdge) continue;
+        const busy = peds.some((p) => p.crossing === c.id && (p.state === 'cross' || (p.state === 'wait' && p.wait > 0.3)));
+        if (!busy) continue;
+        // Route distance where the front reaches the crossing.
+        let sC = j.end;
+        const q = {};
+        for (let s = j.start; s <= j.end + 12; s += 0.5) {
+          this.route.path.at(s, q);
+          if (Math.abs((q.x - c.x) * c.ux + (q.z - c.z) * c.uz) < 4 && Math.abs((q.x - c.x) * -c.uz + (q.z - c.z) * c.ux) < c.width / 2 + 0.6) {
+            sC = s;
+            break;
+          }
+        }
+        best = Math.min(best, sC - c.width / 2 - 1.2 - prog);
+      }
+    }
+    return best;
+  }
+
   // Distance to the first car / pedestrian on the route ahead.
   #obstacle(env, prog) {
     const route = this.route;
     const bus = this.bus;
     const look = Math.max(18, bus.u * 3 + 12);
     let best = Infinity;
+    this.obstacleVeh = null;
     const q = {};
     const half = bus.spec.width / 2;
     for (let d = 1; d < look; d += 1.5) {
@@ -219,12 +376,14 @@ export class Autopilot {
       if (env.traffic) {
         for (const v of env.traffic.vehicles) {
           if (Math.abs(v.x - x) > 8 || Math.abs(v.z - z) > 8) continue;
-          if (pointInBox(x, z, { x: v.x, z: v.z, yaw: v.yaw, hl: v.hl, hw: v.hw }, half + 0.3)) {
-            best = Math.min(best, d - 3);
+          if (pointInBox(x, z, { x: v.x, z: v.z, yaw: v.yaw, hl: v.hl, hw: v.hw }, half + 0.3) && d - 3 < best) {
+            best = d - 3;
+            this.obstacleVeh = v;
           }
         }
       }
       for (const pd of env.pedestrians || []) {
+        if (pd.state !== 'cross') continue;
         if (Math.abs(pd.x - x) < half + 1.2 && Math.abs(pd.z - z) < half + 1.2) best = Math.min(best, d - 2);
       }
       if (best < Infinity) break;
@@ -288,7 +447,7 @@ export class Autopilot {
       const busy = st.waiting.length > 0 || trip.onboard.some((p) => p.to === trip.current || st.last) || bus.doors.some((d) => d.obstructed);
       if (busy) this.clearTimer = 1.6;
       else this.clearTimer = (this.clearTimer || 0) - dt;
-      const early = !st.last && trip.clock < st.sched - 5;
+      const early = !st.last && trip.clock < st.sched - 5 && !this.profile.ignoreSchedule;
       if (!busy && this.clearTimer <= 0 && !early && this.timer <= 0) {
         bus.setDoor(0, false);
         for (let i = 1; i < bus.doors.length; i++) bus.setDoor(i, false);

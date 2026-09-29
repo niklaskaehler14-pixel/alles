@@ -20,8 +20,10 @@ const CAR_COLORS = ['#e7e7e4', '#1d1f24', '#8c9197', '#b8bcc0', '#2f4d7a', '#7a1
 
 const LANE = 0;
 const MOVE = 1;
+const DODGE = 0.85; // how far a car moves to the right edge of its lane to pass a bus
 const IDM = { a: 1.5, b: 2.2, s0: 2.2, T: 1.35 };
-const TURN_SPEED = { straight: 14, right: 4.6, left: 6.2 };
+// Comfortable speed through a junction path: ~2.2 m/s² sideways.
+const turnSpeed = (mv) => (mv.turn === 'straight' ? 14 : Math.min(13, Math.sqrt(2.2 * mv.radius)));
 
 export class Traffic {
   constructor(city, { seed = 7, count = 24 } = {}) {
@@ -130,6 +132,8 @@ export class Traffic {
       spin: 0,
       pitch: 0,
       fade: 0,
+      lat: 0,
+      dodge: 0,
     };
     this.vehicles.push(v);
     return true;
@@ -233,8 +237,8 @@ export class Traffic {
     // Room behind the junction.
     const outList = this.onPiece.get(mv.outLane);
     if (outList && outList.length && outList[0].s - outList[0].hl < v.hl * 2 + 3) return false;
-    // The bus inside the junction blocks every path it covers.
-    if (env.busBoxes && this.#pathBlocked(mv.path, 0, mv.path.length, env.busBoxes, v.hw + 0.5)) return false;
+    // The bus in the junction blocks every path it covers – with room for its swinging tail.
+    if (env.busBoxes && this.#pathBlocked(mv.path, 0, mv.path.length, env.busBoxes, v.hw + (mv.turn === 'straight' ? 0.6 : 1.6))) return false;
 
     // Give way: collect the cars we have to let pass.
     const yieldTo = [];
@@ -249,6 +253,8 @@ export class Traffic {
         for (const o of this.#approaching(li, window)) {
           if (mv.conflicts.has(o.next)) yieldTo.push(o);
         }
+        // The bus coming along a priority lane has the right of way too.
+        if (env.busApproach && env.busApproach.lane === li && env.busApproach.tta < window + 1) return false;
       }
     }
     if (mv.turn === 'left') {
@@ -262,6 +268,8 @@ export class Traffic {
         for (const o of this.#approaching(li, 5.5)) {
           if (city.movements[o.next].turn !== 'left') yieldTo.push(o);
         }
+        const b = env.busApproach;
+        if (b && b.lane === li && b.tta < 6 && b.turn !== 'left') return false;
       }
     }
     if (!yieldTo.length) return true;
@@ -295,6 +303,8 @@ export class Traffic {
     let travelled = 0;
     const p = {};
     const margin = v.hw + 0.45;
+    // Cars squeeze past a bus a little closer on a straight lane; while turning the corners sweep out.
+    const busMargin = v.hw + (v.kind === MOVE && this.city.movements[v.id].turn !== 'straight' ? 0.75 : 0.25);
     const busBoxes = env.busBoxes || [];
     const peds = env.pedestrians || [];
     const crashed = this.crashed;
@@ -311,7 +321,19 @@ export class Traffic {
         path.at(s, p);
         for (let k = 0; k < busBoxes.length; k++) {
           const b = busBoxes[k];
-          if (pointInBox(p.x, p.z, b, margin)) return { gap: d - v.hl - 0.3, speed: Math.max(0, env.busSpeedAlong ? env.busSpeedAlong(p.dx, p.dz) : 0), bus: true };
+          // Sample on the car's current lateral position (it may already be dodging).
+          const lat = kind === LANE ? v.lat : 0;
+          const px = p.x - p.dz * lat;
+          const pz = p.z + p.dx * lat;
+          if (!pointInBox(px, pz, b, busMargin)) continue;
+          // On a straight lane a car can move over to the right edge of its lane to pass the bus.
+          const canDodge = kind === LANE && !busBoxes.some((bb) => pointInBox(p.x - p.dz * DODGE, p.z + p.dx * DODGE, bb, busMargin));
+          if (canDodge) {
+            v.dodge = 1.5;
+            if (Math.abs(v.lat - DODGE) < 0.05) continue;
+            return { gap: Math.max(d - v.hl - 0.3, 3), speed: 1.5, bus: true, dodging: true };
+          }
+          return { gap: d - v.hl - 0.3, speed: Math.max(0, env.busSpeedAlong ? env.busSpeedAlong(p.dx, p.dz) : 0), bus: true };
         }
         for (let k = 0; k < yields.length; k++) {
           if (pointInBox(p.x, p.z, yields[k], 0.2)) return { gap: d - v.hl - 1, speed: 0, bus: true, courtesy: true };
@@ -369,7 +391,7 @@ export class Traffic {
       if (v.kind === LANE) {
         const mv = city.movements[v.next];
         const dist = path.length - v.s - v.hl;
-        const vt = TURN_SPEED[mv.turn];
+        const vt = turnSpeed(mv);
         turnLimit = Math.sqrt(vt * vt + 2 * 1.4 * Math.max(0, dist));
         v.indicator = mv.turn === 'left' ? 1 : mv.turn === 'right' ? -1 : 0;
         if (dist > 45) v.indicator = 0;
@@ -377,7 +399,7 @@ export class Traffic {
         desired = (lane.speed / 3.6) * v.desiredFactor;
       } else {
         const mv = city.movements[v.id];
-        turnLimit = TURN_SPEED[mv.turn];
+        turnLimit = turnSpeed(mv);
         v.indicator = mv.turn === 'left' ? 1 : mv.turn === 'right' ? -1 : 0;
       }
       desired = Math.min(desired, turnLimit);
@@ -427,6 +449,12 @@ export class Traffic {
         }
       }
 
+      // Face to face with a waiting bus for a while: back up a few metres to let it through.
+      if (obs && obs.bus && !obs.courtesy && v.wait > 6 && (env.busStopped || 0) > 5 && Math.cos(v.yaw - (env.busYaw ?? 0)) < 0.3 && (v.backed || 0) < 8) {
+        this.#backUp(v, dt);
+        continue;
+      }
+      if (v.v > 1) v.backed = 0;
       acc = clamp(acc, -8, IDM.a);
       v.acc = acc;
       v.v = Math.max(0, v.v + acc * dt);
@@ -462,10 +490,15 @@ export class Traffic {
           v.next = this.#chooseMovement(v.id);
         }
       }
+      // Lateral dodge towards the right edge of the lane (and back once past).
+      v.dodge = Math.max(0, v.dodge - dt);
+      const latTarget = v.kind === LANE && v.dodge > 0 ? DODGE : 0;
+      const dl = latTarget - v.lat;
+      v.lat += Math.sign(dl) * Math.min(Math.abs(dl), 0.9 * dt);
       const p = this.path(v).at(v.s);
-      v.x = p.x;
-      v.z = p.z;
-      v.yaw = p.yaw;
+      v.x = p.x - p.dz * v.lat;
+      v.z = p.z + p.dx * v.lat;
+      v.yaw = p.yaw - (dl !== 0 ? Math.sign(dl) * Math.min(0.12, Math.abs(dl)) * Math.min(1, v.v / 3) : 0);
     }
 
     // Despawn far or finished crashed cars, spawn new ones out of sight.
@@ -485,6 +518,31 @@ export class Traffic {
       this.spawnTimer = 0.25;
       for (let k = 0; k < 6; k++) if (this.#trySpawn(busX, busZ, 150, this.radius, env.busBoxes)) break;
     }
+  }
+
+  // Reverse slowly along the path (back into the approach lane if necessary).
+  #backUp(v, dt) {
+    const step = 1.1 * dt;
+    v.backed = (v.backed || 0) + step;
+    v.braking = false;
+    v.reversing = 0.5;
+    v.s -= step;
+    if (v.s < 0.5 && v.kind === MOVE) {
+      const mv = this.city.movements[v.id];
+      const set = this.nodeOcc.get(mv.node);
+      if (set) set.delete(v);
+      v.kind = LANE;
+      v.id = mv.inLane;
+      v.next = mv.id;
+      v.committed = false;
+      v.permit = false;
+      v.s += this.city.lanes[v.id].path.length;
+    }
+    v.s = Math.max(0, v.s);
+    const p = this.path(v).at(v.s);
+    v.x = p.x - p.dz * v.lat;
+    v.z = p.z + p.dx * v.lat;
+    v.yaw = p.yaw;
   }
 
   // Called when the bus overlaps a car.

@@ -320,8 +320,8 @@ export class Trip {
         p.target = p.home;
       }
     }
-    if (st.served && st.delay < -this.diff.early && this.current > 0) this.events.push({ type: 'fault', code: 'early', detail: `${Math.round(-st.delay)} s` });
-    if (st.served && this.current === 0 && st.delay < -this.diff.early) this.events.push({ type: 'fault', code: 'early', detail: `${Math.round(-st.delay)} s` });
+    // Leaving before the timetable says so (arriving early at the terminus is fine).
+    if (st.served && !st.last && st.delay < -this.diff.early) this.events.push({ type: 'fault', code: 'early', detail: `${Math.round(-st.delay)} s` });
     if (st.served && st.quality) this.stopScores.push(st.quality.score);
     this.events.push({ type: 'depart', stop: st, signalled: ctx.departSignalled });
     if (st.last) {

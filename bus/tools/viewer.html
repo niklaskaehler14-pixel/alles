@@ -1,0 +1,46 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>city viewer</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}</style></head>
+<body>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { buildCity } from '../src/citymap.js';
+import { buildLayout } from '../src/layout.js';
+import { CityView } from '../src/cityView.js';
+import { PropsView } from '../src/propsView.js';
+import { LandmarksView, landmarkBuildings } from '../src/landmarks.js';
+import { Environment } from '../src/environment.js';
+const q = new URLSearchParams(location.search);
+const t0 = performance.now();
+const city = buildCity();
+const layout = buildLayout(city);
+layout.buildings.push(...landmarkBuildings(layout));
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const env = new Environment(renderer, scene, { shadows: 2048, drawDistance: 1400 });
+env.set(q.get('time') || 'day');
+const cv = new CityView(city, layout, { shadows: true });
+const pv = new PropsView(city, layout, { shadows: true });
+const lv = new LandmarksView(layout, { shadows: true });
+scene.add(cv.group, pv.group, lv.group);
+const night = env.preset.night;
+cv.setNight(night); pv.setNight(night); lv.setNight(night);
+const camera = new THREE.PerspectiveCamera(+(q.get('fov') || 60), innerWidth / innerHeight, 0.1, 5000);
+const [cx, cy, cz] = (q.get('cam') || '-60,120,150').split(',').map(Number);
+const [tx, ty, tz] = (q.get('look') || '-60,0,-60').split(',').map(Number);
+camera.position.set(cx, cy, cz);
+camera.lookAt(tx, ty, tz);
+pv.updateSignals(+(q.get('t') || 0));
+env.update(0, 0, new THREE.Vector3(tx, 0, tz), camera);
+renderer.render(scene, camera);
+renderer.render(scene, camera);
+const info = renderer.info.render;
+console.log(`built+render ${(performance.now() - t0).toFixed(0)} ms, calls ${info.calls}, triangles ${info.triangles}`);
+window.__done = true;
+</script></body></html>

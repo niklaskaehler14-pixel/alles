@@ -1,0 +1,74 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>bus viewer</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}</style></head>
+<body>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { buildCity } from '../src/citymap.js';
+import { buildLayout } from '../src/layout.js';
+import { CityView } from '../src/cityView.js';
+import { PropsView } from '../src/propsView.js';
+import { LandmarksView, landmarkBuildings } from '../src/landmarks.js';
+import { Environment } from '../src/environment.js';
+import { Bus } from '../src/busPhysics.js';
+import { BUS_TYPES } from '../src/busTypes.js';
+import { BusModel } from '../src/busModel.js';
+import { LIVERIES } from '../src/company.js';
+const q = new URLSearchParams(location.search);
+const city = buildCity();
+const layout = buildLayout(city);
+layout.buildings.push(...landmarkBuildings(layout));
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const env = new Environment(renderer, scene, { shadows: 2048, drawDistance: 1400 });
+env.set(q.get('time') || 'day');
+const cv = new CityView(city, layout, { shadows: true });
+const pv = new PropsView(city, layout, { shadows: true });
+const lv = new LandmarksView(layout, { shadows: true });
+scene.add(cv.group, pv.group, lv.group);
+cv.setNight(env.preset.night); pv.setNight(env.preset.night); lv.setNight(env.preset.night);
+const spec = BUS_TYPES[q.get('bus') || 'solo'];
+const bus = new Bus(spec);
+const st = city.stopById[q.get('stop') || 'hbf-w'];
+const lane = city.lanes[st.lane];
+const p = lane.path.at(st.sFront);
+const lat = st.curbOffset - spec.width / 2 - 0.2;
+bus.resetAtFront(p.x + st.rx * lat, p.z + st.rz * lat, lane.yaw);
+bus.yaw2 = bus.yaw + (+(q.get('art') || 0));
+if (q.get('doors')) { bus.setDoor(0, true); bus.setDoor(1, true); for (let i = 0; i < 400; i++) bus.step(1/120, { brake: 0.3 }, { ground: () => 0 }); }
+bus.steer = +(q.get('steer') || 0);
+const model = new BusModel(spec, LIVERIES[+(q.get('livery') || 0)]);
+scene.add(model.root);
+model.setDestination('1', 'Klinikum');
+model.update({ bus, dt: 0.1, indicator: +(q.get('ind') || 0), lights: !!q.get('lights'), braking: true, night: env.preset.night });
+model.drawDashboard({ kmh: 32, clock: '07:41', gear: 'D2', doors: true, stopBrake: true, request: true, kneel: false, parking: false, retarder: true, indicator: 1, blinkOn: true });
+model.drawInfoScreen('1', 'St. Marien', true);
+const camera = new THREE.PerspectiveCamera(+(q.get('fov') || 50), innerWidth / innerHeight, 0.05, 5000);
+const f = bus.frontPos();
+const view = q.get('view') || 'front';
+if (view === 'cockpit') {
+  model.body.updateMatrixWorld(true);
+  const eye = new THREE.Vector3(); model.driverEye.getWorldPosition(eye);
+  camera.position.copy(eye);
+  const look = eye.clone().add(new THREE.Vector3(Math.sin(bus.yaw) * 10, -1.2, Math.cos(bus.yaw) * 10));
+  camera.lookAt(look);
+} else {
+  const [dx, dy, dz] = (q.get('off') || '10,4,14').split(',').map(Number);
+  // offsets relative to the bus: dx left, dz forward
+  const s = Math.sin(bus.yaw), c = Math.cos(bus.yaw);
+  const cx = f[0] + c * dx + s * dz, cz = f[1] - s * dx + c * dz;
+  camera.position.set(cx, dy, cz);
+  const [lx, lz] = bus.localToWorld(0, bus.geo.center + +(q.get('lookz') || 0));
+  camera.lookAt(lx, 1.5, lz);
+}
+env.update(0, 0, new THREE.Vector3(bus.x, 0, bus.z), camera);
+renderer.render(scene, camera);
+renderer.render(scene, camera);
+console.log('calls', renderer.info.render.calls);
+window.__done = true;
+</script></body></html>

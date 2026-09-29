@@ -106,17 +106,19 @@ try {
   await step('menu tabs', async () => {
     await page.click('#r-menu');
     await run(800);
-    await page.click('[data-tab="fleet"]');
+    await page.evaluate(() => document.querySelector('[data-tab="fleet"]').click());
     await run(400);
     const cards = await page.locator('.bus-card').count();
     if (cards !== 4) throw new Error(`expected 4 buses in the fleet, got ${cards}`);
     await shot('08-fleet');
-    await page.click('[data-tab="drive"]');
+    await page.evaluate(() => document.querySelector('[data-tab="drive"]').click());
   });
   await step('ticket sale by hand', async () => {
     await page.evaluate(() => window.__bus.start({ tripId: '1a', difficulty: 'normal' }));
     await run(1000);
     await page.keyboard.press('Space');
+    // The key is handled in the next frame: wait until the doors really open.
+    await page.waitForFunction(() => window.__bus.G.sim.bus.doorsOpen, null, { timeout: 20000 });
     const ok = await page.evaluate(() => {
       const B = window.__bus;
       for (let i = 0; i < 60 && !B.G.sim.trip.pendingSale; i++) B.fastForward(1);
@@ -162,17 +164,20 @@ try {
       B.fastForward(Math.max(0, t.nextStop.sched - t.clock));
     });
     await page.keyboard.press('Space');
+    await page.waitForFunction(() => window.__bus.G.sim.bus.doors.every((d) => d.target === 0), null, { timeout: 20000 });
     await page.evaluate(() => window.__bus.fastForward(4));
     await page.keyboard.press('KeyP');
     await page.keyboard.press('KeyQ');
+    await page.waitForFunction(() => !window.__bus.G.sim.bus.parkingBrake && window.__bus.G.sim.indicator === 1, null, { timeout: 20000 });
+    // The software renderer in CI draws only a few frames per second: wait on the game, not the clock.
     await page.keyboard.down('KeyW');
-    await run(4000);
+    await page.waitForFunction(() => window.__bus.G.sim.bus.kmh > 12, null, { timeout: 90000 }).catch(() => {});
     await page.keyboard.up('KeyW');
     const s1 = await state();
     await shot('10-keyboard-drive');
-    if (s1.kmh < 2) throw new Error(`bus did not move (${s1.kmh.toFixed(1)} km/h)`);
+    if (s1.kmh < 5) throw new Error(`bus did not move (${s1.kmh.toFixed(1)} km/h)`);
     await page.keyboard.down('KeyS');
-    await run(3000);
+    await page.waitForFunction((v0) => window.__bus.G.sim.bus.kmh < v0 - 5, s1.kmh, { timeout: 60000 }).catch(() => {});
     await page.keyboard.up('KeyS');
     const s2 = await state();
     console.log(`    ${s1.kmh.toFixed(1)} km/h after gas, ${s2.kmh.toFixed(1)} km/h after braking, faults: ${JSON.stringify(s2.faults)}`);

@@ -188,7 +188,6 @@ export class Hud {
       comfortBar: $('h-comfort-bar'),
       points: $('h-points'),
       cash: $('h-cash'),
-      mode: $('h-mode'),
       minimap: $('minimap'),
       bigmap: $('bigmap'),
       mapOverlay: $('map'),

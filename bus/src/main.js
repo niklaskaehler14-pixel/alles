@@ -649,11 +649,14 @@ function renderFrame(dt) {
 
   // Camera.
   if (G.mode === 'menu') {
-    G.menuAngle += dt * 0.045;
+    // Slow sway in front of the parked bus, always above the street (never inside a house),
+    // with the bus shifted to the right of the menu panel.
+    G.menuAngle += dt * 0.12;
     const c = bus.localToWorld(0, bus.geo.center);
-    const a = bus.yaw + 2.2 + Math.sin(G.menuAngle) * 0.9;
-    W.camera.position.set(c[0] + Math.sin(a) * 30, 9 + Math.sin(G.menuAngle * 0.7) * 3, c[1] + Math.cos(a) * 30);
-    W.camera.lookAt(c[0] + Math.sin(bus.yaw) * 4, 2.6, c[1] + Math.cos(bus.yaw) * 4);
+    const a = bus.yaw + 0.3 + Math.sin(G.menuAngle) * 0.1;
+    const dist = 24 + Math.sin(G.menuAngle * 0.6) * 2;
+    W.camera.position.set(c[0] + Math.sin(a) * dist, 4.2 + Math.sin(G.menuAngle * 0.8) * 0.8, c[1] + Math.cos(a) * dist);
+    W.camera.lookAt(c[0] - Math.cos(a) * 5, 2.2, c[1] + Math.sin(a) * 5);
   } else {
     W.rig.update(dt, bus, model, W.input.look, { steer: bus.steer / bus.spec.steerMax });
   }
@@ -767,6 +770,7 @@ function hudSnapshot(blinkOn) {
   let hint = systemHint(sim);
   if (!hint && W.hud.saleOpen) hint = 'Fahrkarte wählen, Rückgeld auszahlen, drucken (Enter)';
   if (!hint && trip && trip.diff.hints) hint = trip.hint;
+  if (hint === 'Links blinken (Q) und abfahren' && sim.indicator === 1) hint = 'Spiegel prüfen, dann aus der Haltestelle lenken';
   let nearStop = '';
   if (!trip) {
     let best = 1e9;

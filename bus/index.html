@@ -78,13 +78,14 @@
     padding: calc(24px + var(--safe-t)) 24px calc(24px + var(--safe-b)) calc(24px + var(--safe-l));
     display: flex; flex-direction: column; gap: 18px;
   }
+  .menu-panel > * { flex-shrink: 0; }
   .menu-head { display: grid; gap: 6px; }
   .menu-head .led-brand { font-size: clamp(34px, 8vw, 46px); }
   .company-line { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--dim); font-size: 14px; }
   .company-line b { color: var(--paper); font-family: var(--mono); font-weight: 600; }
   .stars { color: var(--led); letter-spacing: 2px; }
   .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
-  .tabs button { background: none; border: 0; padding: 10px 12px; color: var(--dim); font-weight: 700; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tabs button { background: none; border: 0; padding: 10px 9px; color: var(--dim); font-weight: 700; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
   .tabs button[aria-selected="true"] { color: var(--paper); border-bottom-color: var(--led); }
   .panel { display: grid; gap: 16px; }
   .panel h2 { margin: 0; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
@@ -304,6 +305,7 @@
   body.touch .timetable { display: none; }
 
   @media (max-width: 760px) {
+    #menu { background: rgba(8, 12, 16, 0.9); }
     .hud-left-col { width: calc(100vw - 24px - var(--safe-l) - var(--safe-r)); }
     .toasts { width: calc(100% - 170px); }
     .hud-buttons { top: calc(92px + var(--safe-t)); }
@@ -348,8 +350,8 @@
       <button type="button" role="tab" data-tab="drive" aria-selected="true">Fahren</button>
       <button type="button" role="tab" data-tab="company" aria-selected="false">Betrieb</button>
       <button type="button" role="tab" data-tab="fleet" aria-selected="false">Fuhrpark</button>
-      <button type="button" role="tab" data-tab="settings" aria-selected="false">Einstellungen</button>
-      <button type="button" role="tab" data-tab="help" aria-selected="false">Steuerung</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false">Optionen</button>
+      <button type="button" role="tab" data-tab="help" aria-selected="false">Hilfe</button>
     </nav>
 
     <section class="panel" data-panel="drive">

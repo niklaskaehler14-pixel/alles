@@ -101,6 +101,10 @@ export class Autopilot {
     const out = { throttle: 0, brake: 0, steer: 0 };
     const front = bus.frontPos();
     const prog = trip.progress;
+    // Get the bus ready: engine on, parking brake off, drive selected.
+    if (!bus.engineOn && bus.starter <= 0) bus.setEngine(true);
+    if (bus.parkingBrake) bus.setParkingBrake(false);
+    if (bus.selector !== 'D' && Math.abs(bus.u) < 0.1) bus.setSelector('D');
 
     // ---- steering: Stanley on the front axle
     const fa = bus.localToWorld(0, bus.L);

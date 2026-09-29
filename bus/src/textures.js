@@ -416,7 +416,7 @@ export function shopTextures() {
     g.fillStyle = color;
     g.fillRect(x0 + 8, 18, fw - 16, 44);
     g.fillStyle = '#fff';
-    g.font = 'bold 26px Barlow, Arial, sans-serif';
+    g.font = 'bold 26px "Atkinson Hyperlegible", Arial, sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(name, x0 + fw / 2, 41, fw - 28);
@@ -722,12 +722,12 @@ export function drawDestination(ctx, w, h, line, text, color = '#ffb52e') {
   ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = color;
   ctx.textBaseline = 'middle';
-  ctx.font = `bold ${Math.floor(h * 0.72)}px "Chivo Mono", monospace`;
+  ctx.font = `bold ${Math.floor(h * 0.72)}px "IBM Plex Mono", ui-monospace, monospace`;
   ctx.textAlign = 'left';
   const pad = h * 0.18;
   ctx.fillText(line, pad, h * 0.54);
   const lw = ctx.measureText(line).width + pad * 2.2;
-  ctx.font = `bold ${Math.floor(h * 0.5)}px "Barlow", Arial, sans-serif`;
+  ctx.font = `bold ${Math.floor(h * 0.5)}px "Atkinson Hyperlegible", Arial, sans-serif`;
   ctx.fillText(text, lw, h * 0.54, w - lw - pad);
   // Dot-matrix grid overlay.
   ctx.fillStyle = 'rgba(0,0,0,0.55)';

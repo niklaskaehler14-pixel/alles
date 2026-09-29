@@ -27,6 +27,8 @@ const TAP = {
   KeyK: 'kneel',
   KeyP: 'parkingBrake',
   KeyR: 'reverse',
+  KeyN: 'neutral',
+  KeyO: 'autopilot',
   KeyI: 'engine',
   KeyL: 'lights',
   KeyC: 'camera',

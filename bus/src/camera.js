@@ -10,7 +10,7 @@ export class CameraRig {
     this.camera = camera;
     this.mode = 'cockpit';
     this.lookYaw = 0;
-    this.lookPitch = -0.08;
+    this.lookPitch = -0.2;
     this.orbitYaw = 2.4;
     this.orbitPitch = 0.45;
     this.orbitDist = 26;
@@ -24,7 +24,7 @@ export class CameraRig {
   set(mode) {
     this.mode = mode;
     this.smoothYaw = null;
-    this.camera.fov = mode === 'cockpit' ? 70 : 55;
+    this.camera.fov = mode === 'cockpit' ? 72 : 55;
     this.camera.near = mode === 'cockpit' ? 0.05 : 0.2;
     this.camera.updateProjectionMatrix();
   }
@@ -98,6 +98,6 @@ export class CameraRig {
 
   resetLook() {
     this.lookYaw = 0;
-    this.lookPitch = -0.08;
+    this.lookPitch = -0.2;
   }
 }

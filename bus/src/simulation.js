@@ -55,12 +55,15 @@ export class Simulation {
       const p = lane.path.at(s0.sFront);
       this.bus.resetAtFront(p.x, p.z, lane.yaw);
     }
-    const engineManual = this.trip && this.trip.diff.engine === 'manual';
-    if (engineManual) {
-      this.bus.engineOn = false;
-      this.bus.rpm = 0;
+    // A bus waiting at the first stop is secured with the parking brake; on "Profi" the
+    // engine is off as well and has to be started.
+    if (this.trip) {
       this.bus.setParkingBrake(true);
-      this.bus.selector = 'N';
+      if (this.trip.diff.engine === 'manual') {
+        this.bus.engineOn = false;
+        this.bus.rpm = 0;
+        this.bus.selector = 'N';
+      }
       this.bus.drainEvents();
     }
     this.traffic.reset(this.bus.x, this.bus.z, this.bus.boxes().map((b) => ({ ...b, hl: b.hl + 12, hw: b.hw + 3 })));

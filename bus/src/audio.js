@@ -189,8 +189,12 @@ export class BusAudio {
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(gain, t + 0.008);
-    if (decay) g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
-    else g.gain.setValueAtTime(gain, t + dur - 0.01), g.gain.linearRampToValueAtTime(0, t + dur);
+    if (decay) {
+      g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    } else {
+      g.gain.setValueAtTime(gain, t + dur - 0.01);
+      g.gain.linearRampToValueAtTime(0, t + dur);
+    }
     o.connect(g).connect(this.master);
     o.start(t);
     o.stop(t + dur + 0.05);
@@ -248,8 +252,9 @@ export class BusAudio {
     this.#tone(3600, 0.15, 0.05, 'sine', 0.02);
   }
 
+  // Ticket printer: a quick rattle of short bursts.
   printer() {
-    for (let k = 0; k < 6; k++) this.#burst(2800, 3, 0.04, 0.08, 'bandpass', 0.001), (void 0);
+    for (let k = 0; k < 6; k++) setTimeout(() => this.#burst(2800, 3, 0.04, 0.08, 'bandpass', 0.001), k * 55);
   }
 
   good() {

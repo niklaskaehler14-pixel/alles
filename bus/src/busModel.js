@@ -142,7 +142,9 @@ export class BusModel {
       pole: new THREE.MeshStandardMaterial({ color: '#f2c230', roughness: 0.35, metalness: 0.4 }),
       ceiling: new THREE.MeshStandardMaterial({ color: '#e6e8ea', roughness: 0.8 }),
       ceilingLight: new THREE.MeshStandardMaterial({ color: '#f5f5f0', emissive: new THREE.Color('#fff9ec'), emissiveIntensity: 0.3, roughness: 0.3 }),
-      dash: new THREE.MeshStandardMaterial({ color: '#2a2e33', roughness: 0.75 }),
+      // Cab plastics get a little self-light: the cab sits in the shadow of the roof.
+      dash: new THREE.MeshStandardMaterial({ color: '#3b4047', emissive: new THREE.Color('#171a1e'), roughness: 0.75 }),
+      cabBlack: new THREE.MeshStandardMaterial({ color: '#23262b', emissive: new THREE.Color('#0e1013'), roughness: 0.55 }),
       red: new THREE.MeshStandardMaterial({ color: '#c8102e', emissive: new THREE.Color('#ff2020'), emissiveIntensity: 0, roughness: 0.4 }),
     };
   }
@@ -204,7 +206,7 @@ export class BusModel {
       // Windows between pillars (skipping doors and the engine tower).
       const panes = [];
       const w0 = Math.max(zr + 0.25, side > 0 ? towerEnd : zr + 0.25);
-      const w1 = zf - (S.front ? 0.28 : 0.2);
+      const w1 = zf - (S.front ? 0.12 : 0.2); // slim A-pillar in front of the driver's window
       let segs = [[w0, w1]];
       for (const [d0, d1] of doors) {
         const next = [];
@@ -468,7 +470,7 @@ export class BusModel {
           const base = S.axles.some(([za]) => Math.abs(z - za) < 0.8) ? 0.25 : 0;
           seats.box(x, FLOOR + 0.42 + base, z, 0.44, 0.1, 0.44, 0);
           seats.box(x, FLOOR + 0.75 + base, z - 0.2, 0.44, 0.6, 0.08, -0.12);
-          this.interiorSeats.push([x, FLOOR + 0.5 + base, z + 0.02]);
+          this.interiorSeats.push([x, FLOOR + 0.5 + base, z + 0.02, parent === this.trailer ? 1 : 0]);
         }
         poles.cylinder(side * (HALF - 1.0), FLOOR, z + 0.25, 0.022, 0.022, 2.1, 6);
       }
@@ -505,6 +507,8 @@ export class BusModel {
     d.box(0.55, 1.02, zf - 0.45, 1.3, 0.3, 0.6, 0);
     d.box(-0.6, 0.95, zf - 0.35, 1.1, 0.2, 0.45, 0);
     d.box(0.55, 0.62, zf - 0.6, 1.2, 0.55, 0.3, 0);
+    // Instrument binnacle above the steering wheel.
+    d.box(0.6, 1.27, zf - 0.5, 0.74, 0.3, 0.26, 0);
     // Cab partition behind the driver and a fare box near door 1.
     d.box(0.05, 1.3, zf - 2.3, 0.06, 1.1, 1.1, 0);
     d.box(-0.25, 1.05, zf - 1.35, 0.35, 0.4, 0.3, 0);
@@ -515,15 +519,15 @@ export class BusModel {
     // Instrument screen (canvas) facing the driver.
     this.dashCanvas = makeCanvasTexture(512, 256);
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.31), new THREE.MeshBasicMaterial({ map: this.dashCanvas.texture, toneMapped: false }));
-    screen.position.set(0.6, 1.22, zf - 0.72);
-    screen.rotation.set(-0.55, Math.PI, 0);
+    screen.position.set(0.6, 1.33, zf - 0.69);
+    screen.rotation.set(-0.6, Math.PI, 0);
     cab.add(screen);
     this.dashScreen = screen;
     // Steering wheel (nearly flat, like in a bus).
     this.steeringWheel = new THREE.Group();
     this.steeringWheel.position.set(0.62, 1.2, zf - 1.05);
     this.steeringWheel.rotation.x = -0.95;
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.022, 8, 28), this.mats.black);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.022, 8, 28), this.mats.cabBlack);
     rim.rotation.x = Math.PI / 2;
     this.steeringWheel.add(rim);
     for (const a of [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]) {
@@ -546,6 +550,9 @@ export class BusModel {
     // Dark header above the windscreen (houses the destination display).
     const hdr = new GeoBuilder();
     hdr.box(0, 2.76, zf - 0.2, HALF * 2 - 0.1, 0.36, 0.3, 0);
+    // Dark trim on the inside of the A-pillars and below the windscreen.
+    for (const sx of [1, -1]) hdr.box(sx * (HALF - 0.05), (SILL + ROOF) / 2, zf - 0.16, 0.04, ROOF - SILL, 0.28, 0);
+    hdr.box(0, 0.96, zf - 0.08, HALF * 2 - 0.12, 0.1, 0.12, 0);
     this.#mesh(cab, hdr.build(), this.mats.dash);
     // Driver's eye position (camera anchor).
     this.driverEye = new THREE.Object3D();
@@ -582,7 +589,7 @@ export class BusModel {
   setMirrorTextures(left, right) {
     for (const m of this.mirrorHeads) {
       const t = m.side > 0 ? left : right;
-      m.glass.material = new THREE.MeshBasicMaterial({ map: t, toneMapped: false });
+      m.glass.material = new THREE.MeshBasicMaterial({ map: t });
       m.glass.geometry = m.glass.geometry.clone();
       const uv = m.glass.geometry.attributes.uv;
       for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
@@ -619,7 +626,7 @@ export class BusModel {
     c.fillStyle = '#050505';
     c.fillRect(0, 0, 128, 64);
     c.fillStyle = color;
-    c.font = 'bold 46px "Chivo Mono", monospace';
+    c.font = 'bold 46px "IBM Plex Mono", ui-monospace, monospace';
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillText(line || '', 64, 35);
@@ -711,7 +718,7 @@ export class BusModel {
     c.arc(cx, cyy, 96, Math.PI * 0.75, Math.PI * 2.25);
     c.stroke();
     c.fillStyle = '#cfd8e0';
-    c.font = '600 16px "Chivo Mono", monospace';
+    c.font = '600 16px "IBM Plex Mono", ui-monospace, monospace';
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     for (let v = 0; v <= 100; v += 20) {
@@ -726,21 +733,21 @@ export class BusModel {
     c.lineTo(cx + Math.cos(a) * 90, cyy + Math.sin(a) * 90);
     c.stroke();
     c.fillStyle = '#ffffff';
-    c.font = '800 34px "Chivo Mono", monospace';
+    c.font = '800 34px "IBM Plex Mono", ui-monospace, monospace';
     c.fillText(String(Math.round(d.kmh)), cx, cyy + 48);
     // Status panel.
     c.textAlign = 'left';
-    c.font = '700 22px "Chivo Mono", monospace';
+    c.font = '700 22px "IBM Plex Mono", ui-monospace, monospace';
     c.fillStyle = '#9fb3c2';
     c.fillText(d.clock, 262, 36);
     c.fillStyle = '#ffffff';
-    c.font = '800 44px "Chivo Mono", monospace';
+    c.font = '800 44px "IBM Plex Mono", ui-monospace, monospace';
     c.fillText(d.gear, 262, 92);
     const lamp = (x, y, text, onState, color) => {
       c.fillStyle = onState ? color : '#222a33';
       c.fillRect(x, y, 108, 34);
       c.fillStyle = onState ? '#101010' : '#56626e';
-      c.font = '700 17px Barlow, Arial, sans-serif';
+      c.font = '700 17px "Atkinson Hyperlegible", Arial, sans-serif';
       c.textAlign = 'center';
       c.fillText(text, x + 54, y + 18);
       c.textAlign = 'left';
@@ -778,32 +785,47 @@ export class BusModel {
     c.fillStyle = color;
     c.fillRect(0, 0, 88, 128);
     c.fillStyle = '#111';
-    c.font = 'bold 54px "Chivo Mono", monospace';
+    c.font = 'bold 54px "IBM Plex Mono", ui-monospace, monospace';
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillText(line, 44, 66);
     c.fillStyle = '#ffffff';
     c.textAlign = 'left';
-    c.font = '600 22px Barlow, Arial, sans-serif';
+    c.font = '600 22px "Atkinson Hyperlegible", Arial, sans-serif';
     c.fillText('Nächster Halt', 104, 34);
-    c.font = 'bold 38px Barlow, Arial, sans-serif';
+    c.font = 'bold 38px "Atkinson Hyperlegible", Arial, sans-serif';
     c.fillText(next, 104, 80, 400);
     if (request) {
       c.fillStyle = '#ff3b30';
       c.fillRect(360, 8, 144, 34);
       c.fillStyle = '#fff';
-      c.font = 'bold 22px Barlow, Arial';
+      c.font = 'bold 22px "Atkinson Hyperlegible", Arial';
       c.textAlign = 'center';
       c.fillText('Wagen hält', 432, 26);
     }
     this.infoCanvas.texture.needsUpdate = true;
   }
 
-  // World positions of seats (for drawing passengers inside).
+  // World position of seat i (seat surface) or standing spot i (floor), for drawing the
+  // passengers inside. Call after update() so the section matrices are current.
   seatWorld(i, out) {
     const p = this.interiorSeats[i % this.interiorSeats.length];
     out.set(p[0], p[1], p[2]);
-    return this.body.localToWorld(out);
+    return (p[3] ? this.trailer : this.body).localToWorld(out);
+  }
+
+  standWorld(i, out) {
+    const p = this.standingSpots[i % this.standingSpots.length];
+    out.set(p[1], p[2], p[3]);
+    return (p[0] ? this.trailer : this.body).localToWorld(out);
+  }
+
+  sectionOfSeat(i) {
+    return this.interiorSeats[i % this.interiorSeats.length][3];
+  }
+
+  sectionOfStand(i) {
+    return this.standingSpots[i % this.standingSpots.length][0];
   }
 
   dispose() {

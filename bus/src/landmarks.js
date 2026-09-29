@@ -53,7 +53,7 @@ function signTexture(lines) {
     g.fillStyle = bg;
     g.fillRect(0, i * 64, 1024, 64);
     g.fillStyle = fg;
-    g.font = 'bold 44px Barlow, Arial, sans-serif';
+    g.font = 'bold 44px "Atkinson Hyperlegible", Arial, sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(text, 512, i * 64 + 34, 980);

@@ -323,7 +323,7 @@ export class PropsView {
       g.textBaseline = 'middle';
       g.fillText('H', x + 28, y + 34);
       g.fillStyle = '#1b1b1b';
-      g.font = 'bold 30px Barlow, Arial, sans-serif';
+      g.font = 'bold 30px "Atkinson Hyperlegible", Arial, sans-serif';
       g.textAlign = 'left';
       g.fillText(n, x + 66, y + 34, 182);
       nameUV[n] = [x / 1024, 1 - (y + 64) / 1024, (x + 256) / 1024, 1 - y / 1024];
@@ -496,7 +496,7 @@ export class PropsView {
         g.fillStyle = posters[i];
         g.fillRect(i * 64, 0, 64, 256);
         g.fillStyle = 'rgba(0,0,0,0.6)';
-        g.font = 'bold 20px Barlow, Arial';
+        g.font = 'bold 20px "Atkinson Hyperlegible", Arial';
         g.save();
         g.translate(i * 64 + 32, 128);
         g.rotate(-Math.PI / 2);

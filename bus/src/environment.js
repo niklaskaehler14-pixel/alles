@@ -1,11 +1,26 @@
-// Sky, sun, fog, shadows and the time of day.
+// Sky, sun, haze, shadows and the time of day. The world is drawn in two passes: first the
+// far landscape (sky, hills, suburbs) with its own depth range, then the town on top.
 import * as THREE from 'three';
 
+// Aerial perspective instead of a hard fog wall: the haze grows with distance but never
+// swallows everything, so mountains 8 km away still show as hazy blue silhouettes.
+// Fog.near = where the haze starts, Fog.far = its e-folding distance.
+THREE.ShaderChunk.fog_fragment = `
+#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+  #else
+    float fogFactor = 0.9 * ( 1.0 - exp( - max( vFogDepth - fogNear, 0.0 ) / fogFar ) );
+  #endif
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+#endif
+`;
+
 export const SKIES = {
-  morning: { sunElev: 13, sunAz: 105, sun: '#ffd7a8', sunI: 2.4, hemiSky: '#bcd4f0', hemiGround: '#5d5a48', hemiI: 0.75, top: '#5f93d1', horizon: '#f6d8b8', fog: '#d9d4cc', exposure: 0.62, night: 0, clouds: 0.35, env: 0.8 },
-  day: { sunElev: 52, sunAz: 195, sun: '#fff4e2', sunI: 2.9, hemiSky: '#c7dcf5', hemiGround: '#55584a', hemiI: 0.85, top: '#3b78c9', horizon: '#c6ddef', fog: '#c9d8e4', exposure: 0.55, night: 0, clouds: 0.45, env: 0.9 },
-  evening: { sunElev: 5, sunAz: 262, sun: '#ffab66', sunI: 2.3, hemiSky: '#f0b894', hemiGround: '#40382f', hemiI: 0.6, top: '#4a5e9a', horizon: '#ffb07a', fog: '#d7a98d', exposure: 0.62, night: 0.35, clouds: 0.5, env: 0.8 },
-  night: { sunElev: 38, sunAz: 150, sun: '#9fb4ff', sunI: 0.32, hemiSky: '#34466b', hemiGround: '#111318', hemiI: 0.6, top: '#050a18', horizon: '#1b2744', fog: '#141b2b', exposure: 0.85, night: 1, clouds: 0.3, env: 0.35 },
+  morning: { haze: 1700, sunElev: 13, sunAz: 105, sun: '#ffd7a8', sunI: 2.4, hemiSky: '#bcd4f0', hemiGround: '#5d5a48', hemiI: 0.75, top: '#5f93d1', horizon: '#f6d8b8', fog: '#d9d4cc', exposure: 0.62, night: 0, clouds: 0.35, env: 0.8 },
+  day: { haze: 2600, sunElev: 52, sunAz: 195, sun: '#fff4e2', sunI: 2.9, hemiSky: '#c7dcf5', hemiGround: '#55584a', hemiI: 0.85, top: '#3b78c9', horizon: '#c6ddef', fog: '#c9d8e4', exposure: 0.55, night: 0, clouds: 0.45, env: 0.9 },
+  evening: { haze: 2100, sunElev: 5, sunAz: 262, sun: '#ffab66', sunI: 2.3, hemiSky: '#f0b894', hemiGround: '#40382f', hemiI: 0.6, top: '#4a5e9a', horizon: '#ffb07a', fog: '#d7a98d', exposure: 0.62, night: 0.35, clouds: 0.5, env: 0.8 },
+  night: { haze: 2400, sunElev: 38, sunAz: 150, sun: '#9fb4ff', sunI: 0.32, hemiSky: '#34466b', hemiGround: '#111318', hemiI: 0.6, top: '#050a18', horizon: '#1b2744', fog: '#141b2b', exposure: 0.85, night: 1, clouds: 0.3, env: 0.35 },
 };
 
 const SKY_VS = `
@@ -53,10 +68,12 @@ void main() {
 }`;
 
 export class Environment {
-  constructor(renderer, scene, { shadows = 2048, drawDistance = 1200 } = {}) {
+  constructor(renderer, scene, { shadows = 2048 } = {}) {
     this.renderer = renderer;
     this.scene = scene;
-    this.drawDistance = drawDistance;
+    // Far pass: sky and landscape, with its own lights and a deep depth range.
+    this.back = new THREE.Scene();
+    this.backCam = new THREE.PerspectiveCamera(60, 1, 15, 24000);
     this.skyUniforms = {
       uSun: { value: new THREE.Vector3(0, 1, 0) },
       uTop: { value: new THREE.Color() },
@@ -71,7 +88,10 @@ export class Environment {
     this.sky.scale.setScalar(4000);
     this.sky.frustumCulled = false;
     this.sky.renderOrder = -1;
-    scene.add(this.sky);
+    this.back.add(this.sky);
+    this.backHemi = new THREE.HemisphereLight('#ffffff', '#444444', 0.8);
+    this.backSun = new THREE.DirectionalLight('#ffffff', 2.5);
+    this.back.add(this.backHemi, this.backSun, this.backSun.target);
 
     this.hemi = new THREE.HemisphereLight('#ffffff', '#444444', 0.8);
     scene.add(this.hemi);
@@ -93,9 +113,15 @@ export class Environment {
     }
     scene.add(this.sun);
     scene.add(this.sun.target);
-    scene.fog = new THREE.Fog('#ffffff', 200, drawDistance);
+    scene.fog = new THREE.Fog('#ffffff', 150, 2600);
+    this.back.fog = new THREE.Fog('#ffffff', 150, 2600);
     this.pmrem = new THREE.PMREMGenerator(renderer);
     this.sunDir = new THREE.Vector3();
+  }
+
+  // Landscape meshes (backdrop.js) go into the far pass.
+  addBackdrop(obj) {
+    this.back.add(obj);
   }
 
   set(name) {
@@ -113,31 +139,42 @@ export class Environment {
     u.uSunColor.value.set(p.sun);
     u.uNight.value = p.night >= 1 ? 1 : 0;
     u.uClouds.value = p.clouds;
-    this.sun.color.set(p.sun);
-    this.sun.intensity = p.sunI;
-    this.hemi.color.set(p.hemiSky);
-    this.hemi.groundColor.set(p.hemiGround);
-    this.hemi.intensity = p.hemiI;
-    this.scene.fog.color.set(p.fog);
-    this.scene.fog.near = this.drawDistance * 0.25;
-    this.scene.fog.far = this.drawDistance;
+    for (const [sun, hemi] of [
+      [this.sun, this.hemi],
+      [this.backSun, this.backHemi],
+    ]) {
+      sun.color.set(p.sun);
+      sun.intensity = p.sunI;
+      hemi.color.set(p.hemiSky);
+      hemi.groundColor.set(p.hemiGround);
+      hemi.intensity = p.hemiI;
+    }
+    this.backSun.position.copy(this.sunDir).multiplyScalar(1000);
+    this.backSun.target.position.set(0, 0, 0);
+    for (const f of [this.scene.fog, this.back.fog]) {
+      f.color.set(p.fog);
+      f.near = 150;
+      f.far = p.haze;
+    }
     this.renderer.toneMappingExposure = p.exposure;
     this.night = p.night;
-    // Environment map for reflections (bus paint, glass).
+    // Environment map for reflections (bus paint, glass, water).
     const envScene = new THREE.Scene();
     const envSky = this.sky.clone();
     envSky.material = this.sky.material.clone();
     envSky.material.uniforms = THREE.UniformsUtils.clone(this.skyUniforms);
     envSky.scale.setScalar(100);
     envScene.add(envSky);
-    const ground = new THREE.Mesh(new THREE.CircleGeometry(100, 16), new THREE.MeshBasicMaterial({ color: p.night >= 1 ? '#0b0c10' : '#565a56' }));
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(100, 16), new THREE.MeshBasicMaterial({ color: p.night >= 1 ? '#0b0c10' : '#525c4c' }));
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -1;
     envScene.add(ground);
     if (this.envRT) this.envRT.dispose();
     this.envRT = this.pmrem.fromScene(envScene, 0.02, 0.1, 300);
-    this.scene.environment = this.envRT.texture;
-    this.scene.environmentIntensity = p.env;
+    for (const sc of [this.scene, this.back]) {
+      sc.environment = this.envRT.texture;
+      sc.environmentIntensity = p.env;
+    }
   }
 
   // Keep the shadow box and the sky around the focus point.
@@ -151,5 +188,27 @@ export class Environment {
     const fz = Math.round(focus.z / step) * step;
     this.sun.target.position.set(fx, 0, fz);
     this.sun.position.set(fx + this.sunDir.x * 200, this.sunDir.y * 200, fz + this.sunDir.z * 200);
+  }
+
+  // Draw the landscape, then the town over it (into `target`, or the screen).
+  render(camera, target = null) {
+    const r = this.renderer;
+    const bc = this.backCam;
+    camera.updateMatrixWorld();
+    if (bc.fov !== camera.fov || bc.aspect !== camera.aspect) {
+      bc.fov = camera.fov;
+      bc.aspect = camera.aspect;
+      bc.updateProjectionMatrix();
+    }
+    bc.position.copy(camera.position);
+    bc.quaternion.copy(camera.quaternion);
+    bc.updateMatrixWorld();
+    this.sky.position.copy(camera.position);
+    r.setRenderTarget(target);
+    r.autoClear = false;
+    r.clear(true, true, true);
+    r.render(this.back, bc);
+    r.clearDepth();
+    r.render(this.scene, camera);
   }
 }

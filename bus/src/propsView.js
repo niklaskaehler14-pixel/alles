@@ -8,36 +8,127 @@ import { mulberry32 } from './util.js';
 
 const CURB = ROAD.curbHeight;
 
-function crownGeometry(seed, stretch = 1) {
+// Deciduous crown: a smooth core blob plus leafy cards (alpha cut-outs) around it. The card
+// normals point away from the crown centre, so the foliage is lit like a round volume.
+function leafCrown(seed, stretch = 1) {
   const rng = mulberry32(seed);
-  const parts = [];
-  for (let k = 0; k < 3; k++) {
-    const g = new THREE.IcosahedronGeometry(1, 1);
-    const p = g.attributes.position;
+  const core = new THREE.IcosahedronGeometry(0.62, 1);
+  {
+    const p = core.attributes.position;
+    const n = new Float32Array(p.count * 3);
     for (let i = 0; i < p.count; i++) {
-      const f = 0.82 + rng() * 0.3;
-      p.setXYZ(i, p.getX(i) * f, p.getY(i) * f * stretch, p.getZ(i) * f);
+      const x = p.getX(i);
+      const y = p.getY(i);
+      const z = p.getZ(i);
+      const f = 0.9 + hash01(Math.round(x * 50), Math.round(y * 50) + Math.round(z * 50) * 7) * 0.2;
+      p.setXYZ(i, x * f, y * f * stretch, z * f);
+      const l = Math.hypot(x, y, z) || 1;
+      n.set([x / l, y / l, z / l], i * 3);
     }
-    const s = k === 0 ? 1 : 0.7;
-    g.scale(s, s, s);
-    g.translate(k === 0 ? 0 : (rng() - 0.5) * 1.1, k === 0 ? 0 : 0.35 + rng() * 0.3, k === 0 ? 0 : (rng() - 0.5) * 1.1);
-    parts.push(g.index ? g.toNonIndexed() : g);
+    core.setAttribute('normal', new THREE.BufferAttribute(n, 3));
   }
-  const merged = mergeSimple(parts);
-  merged.computeVertexNormals();
-  return merged;
+  const pos = [];
+  const nor = [];
+  const uv = [];
+  const card = (cx, cy, cz, yaw, tilt, size) => {
+    const s = Math.sin(yaw);
+    const c = Math.cos(yaw);
+    const h = size / 2;
+    // Plane spanned by the local x axis (turned by yaw) and a tilted up axis.
+    const ax = [c * h, 0, -s * h];
+    const ay = [s * Math.sin(tilt) * h, Math.cos(tilt) * h * stretch, c * Math.sin(tilt) * h];
+    const corners = [
+      [-1, -1, 0, 0],
+      [1, -1, 1, 0],
+      [1, 1, 1, 1],
+      [-1, 1, 0, 1],
+    ];
+    const v = corners.map(([a, b, u, w]) => [cx + ax[0] * a + ay[0] * b, cy + ax[1] * a + ay[1] * b, cz + ax[2] * a + ay[2] * b, u, w]);
+    for (const k of [0, 1, 2, 0, 2, 3]) {
+      const [x, y, z, u, w] = v[k];
+      pos.push(x, y, z);
+      const l = Math.hypot(x, y / stretch, z) || 1;
+      nor.push(x / l, y / stretch / l, z / l);
+      uv.push(u, w);
+    }
+  };
+  for (let k = 0; k < 3; k++) card(0, 0, 0, (k * Math.PI) / 3 + rng() * 0.3, 0, 2.15);
+  for (let k = 0; k < 7; k++) {
+    const a = rng() * Math.PI * 2;
+    const e = (rng() - 0.3) * 1.1;
+    const r = 0.62;
+    card(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r * stretch, Math.sin(a) * Math.cos(e) * r, a + Math.PI / 2, (rng() - 0.5) * 0.8, 1.05 + rng() * 0.3);
+  }
+  const cards = new THREE.BufferGeometry();
+  cards.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  cards.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  cards.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return { core, cards };
 }
 
-function mergeSimple(geos) {
-  const total = geos.reduce((s, g) => s + g.attributes.position.count, 0);
-  const pos = new Float32Array(total * 3);
-  let off = 0;
-  for (const g of geos) {
-    pos.set(g.attributes.position.array, off);
-    off += g.attributes.position.array.length;
+function hash01(a, b) {
+  let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// Clusters of leaves on a transparent background (tinted per tree by the instance colour);
+// `opaque` fills the gaps with shade for the crown core.
+function leafTexture(opaque = false) {
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  const rng = mulberry32(404);
+  const greens = ['#3d6b2a', '#4c7d33', '#5a8f3c', '#6d9f47', '#2f5722', '#80b155', '#46742f'];
+  if (opaque) {
+    g.fillStyle = '#2c4a20';
+    g.fillRect(0, 0, S, S);
   }
+  for (let i = 0; i < (opaque ? 2600 : 1700); i++) {
+    const a = rng() * Math.PI * 2;
+    const r = opaque ? rng() * S : Math.sqrt(rng()) * S * 0.47;
+    const x = opaque ? rng() * S : S / 2 + Math.cos(a) * r;
+    const y = opaque ? rng() * S : S / 2 + Math.sin(a) * r;
+    // Darker leaves deeper inside and at the bottom.
+    const shade = r / (S * 0.47);
+    g.fillStyle = greens[Math.floor(rng() * greens.length)];
+    g.globalAlpha = 0.85 + rng() * 0.15;
+    g.save();
+    g.translate(x, y);
+    g.rotate(rng() * Math.PI);
+    g.beginPath();
+    g.ellipse(0, 0, 5 + rng() * 5, 2.5 + rng() * 2.2, 0, 0, Math.PI * 2);
+    g.fill();
+    if (shade < 0.5 && rng() < 0.3) {
+      g.fillStyle = 'rgba(20,35,12,0.5)';
+      g.fill();
+    }
+    g.restore();
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  if (opaque) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+function mergeGeometriesSimple(geos) {
+  const parts = geos.map((g) => (g.index ? g.toNonIndexed() : g));
   const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  for (const [name, size] of [
+    ['position', 3],
+    ['normal', 3],
+  ]) {
+    const arr = new Float32Array(parts.reduce((n, g) => n + g.attributes[name].array.length, 0));
+    let off = 0;
+    for (const g of parts) {
+      arr.set(g.attributes[name].array, off);
+      off += g.attributes[name].array.length;
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
   return out;
 }
 
@@ -106,41 +197,55 @@ export class PropsView {
     const trees = this.layout.trees.filter((t, i) => density >= 1 || (i * 0.618) % 1 < density);
     const kinds = { broad: [], lime: [], conifer: [] };
     for (const t of trees) (kinds[t.kind] || kinds.broad).push(t);
-    const trunkGeo = new THREE.CylinderGeometry(0.13, 0.22, 1, 6);
+    const trunkGeo = new THREE.CylinderGeometry(0.13, 0.22, 1, 6, 1, true);
     trunkGeo.translate(0, 0.5, 0);
     const trunk = this.#instanced(trunkGeo, new THREE.MeshStandardMaterial({ color: '#5a4332', roughness: 1 }), trees.length);
-    const crownMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95, flatShading: true });
-    const geos = {
-      broad: crownGeometry(5, 0.85),
-      lime: crownGeometry(9, 1.25),
-      conifer: (() => {
-        const g = new THREE.ConeGeometry(1, 1, 7, 3);
-        g.translate(0, 0.5, 0);
-        return g;
-      })(),
-    };
+    const coreTex = leafTexture(true);
+    coreTex.repeat.set(2, 2);
+    const coreMat = new THREE.MeshStandardMaterial({ map: coreTex, color: '#b9c2b0', roughness: 0.95 });
+    const cardMat = new THREE.MeshStandardMaterial({ map: leafTexture(), alphaTest: 0.45, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.9 });
+    const coniferMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95 });
+    const crowns = { broad: leafCrown(5, 0.9), lime: leafCrown(9, 1.25) };
+    const coneGeo = (() => {
+      // Two stacked cones read as a fir, not as a party hat.
+      const a = new THREE.ConeGeometry(1, 0.62, 8, 1, true);
+      a.translate(0, 0.31, 0);
+      const b = new THREE.ConeGeometry(0.72, 0.6, 8, 1, true);
+      b.translate(0, 0.66, 0);
+      const c = new THREE.ConeGeometry(0.42, 0.42, 8, 1, true);
+      c.translate(0, 0.9, 0);
+      return mergeGeometriesSimple([a, b, c]);
+    })();
     const rng = mulberry32(17);
     let ti = 0;
     for (const [kind, list] of Object.entries(kinds)) {
       if (!list.length) continue;
-      const crowns = this.#instanced(geos[kind], crownMat, list.length);
+      const layers =
+        kind === 'conifer'
+          ? [this.#instanced(coneGeo, coniferMat, list.length)]
+          : [this.#instanced(crowns[kind].core, coreMat, list.length), this.#instanced(crowns[kind].cards, cardMat, list.length)];
       list.forEach((t, i) => {
         const s = t.scale;
         const base = CURB;
         if (kind === 'conifer') {
           this.#set(trunk, ti++, t.x, base, t.z, 0, 1, 2 * s, 1);
-          this.#set(crowns, i, t.x, base + 1.4 * s, t.z, t.rot, 2.2 * s, 7.5 * s, 2.2 * s);
-          crowns.setColorAt(i, this.tmpC.setHSL(0.36 + rng() * 0.05, 0.42, 0.2 + rng() * 0.06));
+          this.#set(layers[0], i, t.x, base + 1.2 * s, t.z, t.rot, 2.3 * s, 7.8 * s, 2.3 * s);
+          layers[0].setColorAt(i, this.tmpC.setHSL(0.36 + rng() * 0.05, 0.4, 0.2 + rng() * 0.06));
         } else {
           const th = kind === 'lime' ? 3.2 : 2.6;
           this.#set(trunk, ti++, t.x, base, t.z, 0, 1.1 * s, th * s + 1.5, 1.1 * s);
-          const r = (kind === 'lime' ? 2.5 : 2.9) * s;
-          this.#set(crowns, i, t.x, base + (th + 1.8) * s + 1, t.z, t.rot, r, r, r);
-          crowns.setColorAt(i, this.tmpC.setHSL(0.24 + rng() * 0.07, 0.45 + rng() * 0.15, 0.24 + rng() * 0.1));
+          const r = (kind === 'lime' ? 2.6 : 3.0) * s;
+          this.tmpC.setHSL(0.22 + rng() * 0.08, 0.35 + rng() * 0.2, 0.62 + rng() * 0.2);
+          for (const m of layers) {
+            this.#set(m, i, t.x, base + (th + 1.8) * s + 1, t.z, t.rot, r, r, r);
+            m.setColorAt(i, this.tmpC);
+          }
         }
       });
-      crowns.instanceMatrix.needsUpdate = true;
-      if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
+      for (const m of layers) {
+        m.instanceMatrix.needsUpdate = true;
+        if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      }
     }
     trunk.count = ti;
     trunk.instanceMatrix.needsUpdate = true;

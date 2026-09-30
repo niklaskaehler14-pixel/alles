@@ -1,7 +1,7 @@
 // Static city meshes: ground, asphalt, raised sidewalks with curbs, surface areas,
 // road markings and buildings (merged per material).
 import * as THREE from 'three';
-import { ROAD, WORLD } from './config.js';
+import { ROAD, worldExtent } from './config.js';
 import { DIRS, rightOf } from './citymap.js';
 import { Path, offsetPoints } from './path.js';
 import { GeoBuilder, hexRgb, addMacroVariation } from './geo.js';
@@ -59,22 +59,22 @@ export class CityView {
       gb.quad([x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1], [0, 1, 0], [[x0 / s, -z0 / s], [x1 / s, -z0 / s], [x1 / s, -z1 / s], [x0 / s, -z1 / s]]);
       this.asphalt = this.#add(gb.build(), mat, { name: 'asphalt' });
     }
-    // Grass around the city, with a hole for the city and a river bed in the south.
+    // Grass around the city (the green belt up to the landscape), with a hole for the city
+    // and a river bed in the south.
     {
       const grass = T.grassTexture();
       const mat = new THREE.MeshStandardMaterial({ map: grass, roughness: 1 });
       addMacroVariation(mat, 0.25, 0.02);
-      const M = WORLD.margin;
-      const riverZ0 = b.maxZ + H + ROAD.sidewalk + 55;
-      const riverZ1 = riverZ0 + 60;
+      const E = worldExtent(b);
+      const riverZ0 = E.riverZ0;
+      const riverZ1 = E.riverZ1;
       this.river = { z0: riverZ0, z1: riverZ1 };
       const gb = new GeoBuilder();
-      const bigNorth = [b.minX - M, b.minZ - M, b.maxX + M, b.minZ - M, b.maxX + M, riverZ0, b.minX - M, riverZ0];
-      gb.polygon(bigNorth, CURB - 0.002, 6, undefined, [outer.front]);
-      gb.polygon([b.minX - M, riverZ1, b.maxX + M, riverZ1, b.maxX + M, b.maxZ + M, b.minX - M, b.maxZ + M], CURB - 0.002, 6);
+      const x0 = E.x0;
+      const x1 = E.x1;
+      gb.polygon([x0, E.z0, x1, E.z0, x1, riverZ0, x0, riverZ0], CURB - 0.002, 6, undefined, [outer.front]);
+      gb.polygon([x0, riverZ1, x1, riverZ1, x1, E.z1, x0, E.z1], CURB - 0.002, 6);
       // River banks.
-      const x0 = b.minX - M;
-      const x1 = b.maxX + M;
       const bank = (zTop, zBottom) => gb.quad([x0, CURB, zTop], [x1, CURB, zTop], [x1, -0.9, zBottom], [x0, -0.9, zBottom], [0, 0.8, zTop < zBottom ? 0.6 : -0.6], [[0, 0], [300, 0], [300, 1], [0, 1]]);
       bank(riverZ0, riverZ0 + 5);
       bank(riverZ1, riverZ1 - 5);

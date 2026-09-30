@@ -8,6 +8,7 @@ import { CityView } from './cityView.js';
 import { PropsView } from './propsView.js';
 import { LandmarksView, landmarkBuildings } from './landmarks.js';
 import { Environment } from './environment.js';
+import { Backdrop } from './backdrop.js';
 import { TrafficView } from './trafficView.js';
 import { PeopleView } from './peopleView.js';
 import { BusModel } from './busModel.js';
@@ -23,7 +24,7 @@ import { LINES, findTrip, buildRoute } from './lines.js';
 import { DIFFICULTY, DAYTIME } from './trip.js';
 import { QUALITY, PHYSICS_DT, ROAD } from './config.js';
 import { euroText } from './tickets.js';
-import { clamp, mulberry32 } from './util.js';
+import { clamp, mulberry32, pointInBox } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -122,8 +123,9 @@ async function boot() {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, Q.drawDistance + 400);
-  const env = new Environment(renderer, scene, { shadows: Q.shadows, drawDistance: Q.drawDistance });
+  renderer.info.autoReset = false;
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2600);
+  const env = new Environment(renderer, scene, { shadows: Q.shadows });
   env.set(DAYTIME[settings.daytime].sky);
 
   await progress(46, 'Straßen und Gehwege …');
@@ -135,18 +137,23 @@ async function boot() {
   await progress(74, 'Bahnhof, Rathaus, Klinikum …');
   const landmarksView = new LandmarksView(layout, { shadows: Q.shadows > 0 });
   scene.add(landmarksView.group);
-  await progress(84, 'Verkehr und Fahrgäste …');
-  const trafficView = new TrafficView(60);
+  await progress(80, 'Umland, Hügel und Dörfer …');
+  const backdrop = new Backdrop(city, { quality: Q.backdrop });
+  env.addBackdrop(backdrop.group);
+  await progress(88, 'Verkehr und Fahrgäste …');
+  const trafficView = new TrafficView(60, { quality: settings.quality });
   const peopleView = new PeopleView(340);
   scene.add(trafficView.group, peopleView.group);
 
-  W = { city, layout, statics, renderer, scene, camera, env, cityView, propsView, landmarksView, trafficView, peopleView };
+  W = { city, layout, statics, renderer, scene, camera, env, backdrop, cityView, propsView, landmarksView, trafficView, peopleView };
   W.company = new Company();
   W.hud = new Hud(city, layout);
   W.input = new Input();
   W.input.bindLook(canvas);
   W.input.bindTouch($('touch'));
   W.rig = new CameraRig(camera);
+  const near = [];
+  W.rig.blocked = (x, z) => statics.query(x, z, 1.5, near).some((it) => it.shape === 'box' && it.kind === 'building' && pointInBox(x, z, it, 1.5));
   W.audio = new BusAudio();
   W.audio.volume = settings.volume;
   W.audio.muted = !settings.sound;
@@ -220,6 +227,7 @@ function applyDaytime(daytime) {
   W.cityView.setNight(night);
   W.propsView.setNight(night);
   W.landmarksView.setNight(night);
+  W.backdrop.setNight(night);
 }
 
 function trafficCount() {
@@ -646,6 +654,7 @@ function renderFrame(dt) {
     G.signalTimer = 0.1;
   }
   W.cityView.update(dt, G.time);
+  W.backdrop.update(dt, G.time);
 
   // Camera.
   if (G.mode === 'menu') {
@@ -692,11 +701,13 @@ function renderFrame(dt) {
   }
 
   const r = W.renderer;
+  r.info.reset();
   r.shadowMap.autoUpdate = true;
-  r.render(W.scene, W.camera);
+  W.env.render(W.camera);
 
-  // Mirrors (one per frame, alternating) in the driver's seat.
-  if (G.mode === 'drive' && settings.mirrors && Q.mirrors && W.rig.mode === 'cockpit' && model.mirrorHeads) {
+  // Mirrors in the driver's seat: one of the two every other frame (each ~15 Hz at 60 fps).
+  G.mirrorTick = (G.mirrorTick || 0) + 1;
+  if (G.mode === 'drive' && settings.mirrors && Q.mirrors && W.rig.mode === 'cockpit' && model.mirrorHeads && G.mirrorTick % 2 === 0) {
     const k = G.mirrorFlip++ % 2;
     const m = model.mirrorHeads[k];
     m.head.getWorldPosition(tmpV);
@@ -707,8 +718,7 @@ function renderFrame(dt) {
     const out = m.side * 0.9; // look back along the side, slightly outwards
     cam.lookAt(tmpV.x - s * 20 + c * out, tmpV.y - 1.1, tmpV.z - c * 20 - s * out);
     r.shadowMap.autoUpdate = false;
-    r.setRenderTarget(W.mirrorRT[m.side > 0 ? 0 : 1]);
-    r.render(W.scene, cam);
+    W.env.render(cam, W.mirrorRT[m.side > 0 ? 0 : 1]);
     r.setRenderTarget(null);
     r.shadowMap.autoUpdate = true;
   }

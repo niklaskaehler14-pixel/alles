@@ -2,9 +2,9 @@
 // bus-stop furniture, signal poles and the collision shapes for all of it.
 // Pure data (no three.js); cityView.js turns it into meshes.
 
-import { ROAD } from './config.js';
+import { ROAD, worldExtent } from './config.js';
 import { DIRS, leftOf, rightOf } from './citymap.js';
-import { mulberry32 } from './util.js';
+import { mulberry32, pointInPolygon } from './util.js';
 
 const H = ROAD.half;
 
@@ -399,7 +399,7 @@ export function buildLayout(city, seed = 4242) {
     const st = lm('station', -40, z0 - 30, 0, { w: 124, d: 34, name: 'Hauptbahnhof' });
     addBox(st.x, st.z, 0, 17, 62);
     areaRect('plaza', -150, z0 - 13, 70, z0);
-    lm('tracks', -40, z0 - 80, 0, { length: 1300 });
+    lm('tracks', -40, z0 - 80, 0, { length: 1500 });
     addBox(-40, z0 - 80, 0, 26, 700, 'solid');
     for (let i = 0; i < 6; i++) L.props.push({ type: 'taxi', x: 20 + i * 6.2, z: z0 - 5, yaw: -Math.PI / 2 });
     // Houses along the rest of the northern ring.
@@ -412,9 +412,55 @@ export function buildLayout(city, seed = 4242) {
   // River promenade in the south.
   {
     const z0 = city.bounds.maxZ + H + ROAD.sidewalk;
-    areaRect('grass', city.bounds.minX - 300, z0, city.bounds.maxX + 300, z0 + 50);
-    lm('river', (city.bounds.minX + city.bounds.maxX) / 2, z0 + 80, 0, { width: 60, length: 2200 });
-    for (let x = city.bounds.minX - 250; x < city.bounds.maxX + 250; x += rand(11, 17)) tree(x, z0 + rand(8, 40), rng() < 0.2 ? 'conifer' : 'broad');
+    const E = worldExtent(city.bounds);
+    areaRect('grass', E.x0, z0, E.x1, z0 + 50);
+    for (let x = E.x0 + 8; x < E.x1 - 8; x += rand(11, 17)) tree(x, z0 + rand(8, 40), rng() < 0.2 ? 'conifer' : 'broad');
+  }
+  // Green belt between the ring and the landscape: a tree line along the edge of the town
+  // area, groups of trees inside, and an invisible boundary for the bus.
+  {
+    const E = worldExtent(city.bounds);
+    const trackZ = city.bounds.minZ - H - ROAD.sidewalk - 80;
+    const free = (x, z, clear) => {
+      if (x < E.x0 + 3 || x > E.x1 - 3 || z < E.z0 + 3 || z > E.z1 - 3) return false;
+      if (pointInPolygon(x, z, outer.front)) return false; // inside the ring
+      if (z > E.riverZ0 - 10 && z < E.riverZ1 + 6) return false;
+      if (Math.abs(z - trackZ) < 24) return false;
+      if (z < city.bounds.minZ && z > trackZ && x > -175 && x < 95) return false; // station forecourt
+      for (const b of L.buildings) if (Math.abs(b.x - x) < b.w / 2 + b.d / 2 + clear && Math.abs(b.z - z) < b.w / 2 + b.d / 2 + clear) return false;
+      for (const t of L.trees) if (Math.abs(t.x - x) < 5 && Math.abs(t.z - z) < 5) return false;
+      return true;
+    };
+    const edge = [
+      [E.x0 + 6, E.z0 + 6, E.x1 - 6, E.z0 + 6],
+      [E.x1 - 6, E.z0 + 6, E.x1 - 6, E.z1 - 6],
+      [E.x1 - 6, E.z1 - 6, E.x0 + 6, E.z1 - 6],
+      [E.x0 + 6, E.z1 - 6, E.x0 + 6, E.z0 + 6],
+    ];
+    for (const [ax, az, bx, bz] of edge) {
+      const len = Math.hypot(bx - ax, bz - az);
+      for (let t = 0; t < len; t += rand(7, 12)) {
+        const x = ax + ((bx - ax) * t) / len + rand(-3, 3);
+        const z = az + ((bz - az) * t) / len + rand(-3, 3);
+        if (free(x, z, 4)) tree(x, z, rng() < 0.45 ? 'conifer' : 'broad', rand(1.1, 1.5));
+      }
+    }
+    for (let i = 0; i < 90; i++) {
+      const gx = rand(E.x0, E.x1);
+      const gz = rand(E.z0, E.z1);
+      if (!free(gx, gz, 8)) continue;
+      const n = 3 + Math.floor(rng() * 6);
+      for (let k = 0; k < n; k++) {
+        const x = gx + rand(-14, 14);
+        const z = gz + rand(-14, 14);
+        if (free(x, z, 6)) tree(x, z, rng() < 0.3 ? 'conifer' : 'broad', rand(0.9, 1.35));
+      }
+    }
+    const t = 3;
+    addBox((E.x0 + E.x1) / 2, E.z0 - t, Math.PI / 2, (E.x1 - E.x0) / 2 + t * 2, t, 'solid');
+    addBox((E.x0 + E.x1) / 2, E.z1 + t, Math.PI / 2, (E.x1 - E.x0) / 2 + t * 2, t, 'solid');
+    addBox(E.x0 - t, (E.z0 + E.z1) / 2, 0, (E.z1 - E.z0) / 2 + t * 2, t, 'solid');
+    addBox(E.x1 + t, (E.z0 + E.z1) / 2, 0, (E.z1 - E.z0) / 2 + t * 2, t, 'solid');
   }
   // Rebuild building colliders after filtering.
   L.boxes = L.boxes.filter((b) => b.kind !== 'building');

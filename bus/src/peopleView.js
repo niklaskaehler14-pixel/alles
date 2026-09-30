@@ -10,20 +10,31 @@ export class PeopleView {
     this.group = new THREE.Group();
     this.group.name = 'people';
     const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 });
+    // Rounded limbs (capsules) hanging from the hip / shoulder pivots.
+    const limb = (r, len, sx = 1, sz = 1) => {
+      const g = new THREE.CapsuleGeometry(r, len - 2 * r, 2, 7);
+      g.scale(sx, 1, sz);
+      g.translate(0, -len / 2, 0);
+      return g;
+    };
+    const torso = new THREE.CapsuleGeometry(0.15, 0.34, 3, 9);
+    torso.scale(1.38, 1, 0.78);
+    torso.translate(0, 0.31, 0);
     const geos = {
-      legL: box(0.13, 0.86, 0.15, 0, -0.43, 0),
-      legR: box(0.13, 0.86, 0.15, 0, -0.43, 0),
-      torso: box(0.4, 0.62, 0.22, 0, 0.31, 0),
-      armL: box(0.09, 0.62, 0.11, 0, -0.29, 0),
-      armR: box(0.09, 0.62, 0.11, 0, -0.29, 0),
+      legL: limb(0.074, 0.88, 1, 1.05),
+      legR: limb(0.074, 0.88, 1, 1.05),
+      torso,
+      armL: limb(0.05, 0.62),
+      armR: limb(0.05, 0.62),
       head: (() => {
-        const g = new THREE.SphereGeometry(0.115, 10, 8);
-        g.scale(1, 1.12, 1);
+        const g = new THREE.SphereGeometry(0.112, 12, 9);
+        g.scale(0.92, 1.12, 1);
         return g;
       })(),
       hair: (() => {
-        const g = new THREE.SphereGeometry(0.122, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55);
-        g.translate(0, 0.02, -0.01);
+        const g = new THREE.SphereGeometry(0.12, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.55);
+        g.scale(0.94, 1, 1.02);
+        g.translate(0, 0.022, -0.012);
         return g;
       })(),
     };

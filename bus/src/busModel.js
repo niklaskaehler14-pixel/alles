@@ -6,6 +6,7 @@
 // +z forward, +x left, y up. The rear section's origin is the joint.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { busGeometry } from './busTypes.js';
 import { GeoBuilder, hexRgb } from './geo.js';
 import { makeCanvasTexture, drawDestination, seatTexture, floorTexture } from './textures.js';
@@ -95,6 +96,7 @@ export class BusModel {
     if (interior) this.#cockpit();
     this.#mirrors();
     this.#displays();
+    this.#contactShadow();
     this.headLight = new THREE.SpotLight('#fff3dd', 0, 70, 0.55, 0.5, 1.2);
     this.headLight.position.set(0, 0.9, g.front + 0.2);
     this.headLight.target.position.set(0, 0, g.front + 25);
@@ -105,6 +107,50 @@ export class BusModel {
         o.castShadow = !o.material.transparent;
         o.receiveShadow = true;
       }
+    });
+    this.#optimize();
+  }
+
+  // Soft dark patch on the ground under each section (grounds the bus even without shadow maps).
+  #contactShadow() {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 6, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(0,0,0,0.6)');
+    grad.addColorStop(0.6, 'rgba(0,0,0,0.4)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    const mat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: '#000000', transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    const geo = this.geo;
+    const add = (parent, z0, z1) => {
+      const pg = new THREE.PlaneGeometry(HALF * 2 * 1.35, (z1 - z0) * 1.12);
+      pg.rotateX(-Math.PI / 2);
+      const m = new THREE.Mesh(pg, mat);
+      m.position.set(0, 0.03, (z0 + z1) / 2);
+      m.renderOrder = 1;
+      m.userData.shadowBlob = true;
+      parent.add(m);
+    };
+    add(this.body, geo.rear, geo.front);
+    if (this.trailer) add(this.trailer, geo.trailerRear, geo.trailerFront);
+  }
+
+  // Fewer draw calls: merge the static pieces of every group that share a material
+  // (the wheels become tyre + rim, the body a handful of meshes per material).
+  #optimize() {
+    for (const w of this.wheels) {
+      for (const c of w.spin.children) if (c.material === this.mats.chrome || c.material === this.mats.dark) c.material = this.mats.rim;
+      mergeChildren(w.spin);
+    }
+    if (this.steeringWheel) mergeChildren(this.steeringWheel);
+    for (const g of [this.body, this.trailer, this.cab]) if (g) mergeChildren(g);
+    // Interior pieces sit inside the body: their shadows are never seen.
+    const inside = new Set([this.mats.seat, this.mats.pole, this.mats.interiorFloor, this.mats.ceiling, this.mats.ceilingLight, this.mats.dash, this.mats.cabBlack, this.mats.paintInside]);
+    this.root.traverse((o) => {
+      if (o.isMesh && inside.has(o.material)) o.castShadow = false;
     });
   }
 
@@ -501,6 +547,7 @@ export class BusModel {
     const g = this.geo;
     const zf = g.front;
     const cab = new THREE.Group();
+    this.cab = cab;
     this.body.add(cab);
     // Dashboard across the front, higher on the driver's side.
     const d = new GeoBuilder();
@@ -832,5 +879,36 @@ export class BusModel {
     this.root.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
     });
+  }
+}
+
+// Merge the direct mesh children of a group that share material and attribute layout.
+function mergeChildren(group) {
+  const buckets = new Map();
+  for (const m of group.children) {
+    if (!m.isMesh || m.isInstancedMesh) continue;
+    const key = `${m.material.uuid}|${Object.keys(m.geometry.attributes).sort().join(',')}|${m.castShadow}|${m.renderOrder}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(m);
+  }
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    const geos = list.map((m) => {
+      m.updateMatrix();
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      g.applyMatrix4(m.matrix);
+      return g;
+    });
+    const merged = mergeGeometries(geos, false);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, list[0].material);
+    mesh.castShadow = list[0].castShadow;
+    mesh.receiveShadow = list[0].receiveShadow;
+    mesh.renderOrder = list[0].renderOrder;
+    for (const m of list) {
+      group.remove(m);
+      m.geometry.dispose();
+    }
+    group.add(mesh);
   }
 }

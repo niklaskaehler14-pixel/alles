@@ -10,6 +10,22 @@ Ein 3D-Linienbus-Simulator, der direkt im Browser läuft. Du fährst Stadtbusse 
 - Hauptbahnhof mit Uhrturm und Gleisen, Rathaus, Marienkirche, Theater, Einkaufszentrum, Klinikum, Schulzentrum, Stadion, Stadtpark mit Teich und der Betriebshof
 - Autoverkehr mit Fahrzeugfolge-Modell (IDM), Blinkern, Bremslichtern und Vorfahrtsregeln. Autos lassen den Linienbus aus der Haltestelle (§ 20 Abs. 5 StVO)
 - Fußgänger auf den Gehwegen, an Ampeln und Zebrastreifen
+- Ein Grüngürtel mit Baumreihen um den Ring, der Fluss im Süden mit Uferpromenade
+
+## Das Umland
+
+Nordkamm liegt in einem Flusstal. Hinter der befahrbaren Stadt geht die Landschaft rund 9 km in jede Richtung weiter:
+
+- **Vorstädte** an den Ausfallstraßen, mit Wohnblöcken am Stadtrand, Einfamilienhäusern an Seitenstraßen, Gärten und Gewerbehallen an der Bahnlinie
+- **Felder und Wiesen** in Streifen, Hecken zwischen den Feldern, **Wälder** an den Hängen
+- **Burgberg** mit Burg am westlichen Ende der Hauptstraße, dahinter eine **Bergkette** im Westen, im Osten Hügel mit **Windrädern**, im Nordosten ein **Fernsehturm**
+- **Dörfer** mit Kirchturm, über Landstraßen mit der Stadt verbunden
+- Der **Fluss** fließt weiter durchs Tal
+- **Luftperspektive**: Mit der Entfernung wird die Landschaft dunstig-bläulich, ohne ganz zu verschwinden. Nachts leuchten die Fenster in Vorstadt und Dörfern, und auf Windrädern und Fernsehturm blinken rote Warnlichter.
+
+## Fahrzeuge
+
+Die Autos im Verkehr haben modellierte Karosserien mit Radkästen, gerundeten Flanken, Glas mit Spiegelungen, Felgen, Türfugen und Griffen, Außenspiegeln, deutschen Kennzeichen und einem weichen Schatten. Unterwegs sind Limousinen, Kombis mit Dachreling, Kompaktwagen, SUVs, hellelfenbeinfarbene Taxis mit Dachschild, Transporter und 7,5-t-Kofferlaster. Die Vorderräder lenken beim Abbiegen mit, und Brems-, Blink- und Warnlichter funktionieren.
 
 ## Linien
 
@@ -102,7 +118,10 @@ Eine statische Seite mit ES-Modulen und Three.js (`three@0.186.1` von jsDelivr).
 - **Regeln** (`src/rules.js`): Fehlerkatalog, Überwachung von Ampeln, Stoppschildern, Vorfahrt, Tempo, Blinker, Rechtsabbiegen, Fußgängern und Kollisionen
 - **Fahrt** (`src/trip.js`, `src/tickets.js`, `src/company.js`): Fahrgäste mit Zielen, Fahrkarten, Zeitkarten, Haltewünsche, Fahrplan, Haltequalität, Komfort, Abrechnung, Betrieb
 - **Autopilot** (`src/autopilot.js`): Stanley-Lenkregler an der Vorderachse, Ausholen vor dem Rechtsabbiegen, Schrittgeschwindigkeit, Lückensuche an Vorfahrtstraßen, Spiegelblick vor dem Abfahren, Fahrkartenverkauf. Er fährt alle Linien mit allen Bussen fehlerfrei und dient den Tests.
-- **Grafik** (`src/cityView.js`, `src/propsView.js`, `src/landmarks.js`, `src/busModel.js`, `src/trafficView.js`, `src/peopleView.js`, `src/environment.js`): prozedurale Texturen, zusammengeführte Geometrie und Instanzen, Schatten, Himmel-Shader mit Wolken und Sternen, Straßenlaternen mit Lichtkegeln, Bus mit Innenraum, Fahrerplatz, Zielanzeigen und Fahrgastinfo
+- **Grafik** (`src/cityView.js`, `src/propsView.js`, `src/landmarks.js`, `src/busModel.js`, `src/trafficView.js`, `src/peopleView.js`, `src/environment.js`): prozedurale Texturen, zusammengeführte Geometrie und Instanzen, Schatten, Himmel-Shader mit Wolken und Sternen, Straßenlaternen mit Lichtkegeln, Bus mit Innenraum, Fahrerplatz, Zielanzeigen und Fahrgastinfo. Stadtbäume aus einer texturierten Krone und Blätterkarten mit Alpha-Ausschnitt.
+- **Umland** (`src/backdrop.js`): Gelände aus Rauschfunktionen (sanfte Hügel, Bergkette mit Graten, Burgberg, Flusstal), zwei Geländenetze mit gemalten Texturen (fein im Umkreis von 2,6 km, grob bis 9,5 km), instanzierte Häuser, Bäume und Windrad-Rotoren. Es wird in einem eigenen Durchgang mit eigener Tiefenauflösung zuerst gezeichnet, die Stadt darüber.
+- **Autos** (`src/carModels.js`): Karosserien aus Seitenprofil (Dach- und Gürtellinie als monotone kubische Kurven) und gerundetem Querschnitt geformt, Oberteil glatt, Unterteil mit Radausschnitten, dazu Glas und Anbauteile. Je Variante zwei instanzierte Netze.
+- **Leistung**: Die statischen Teile des Busmodells werden je Material zusammengelegt (51 statt vorher 110 Netze), die Innenraumteile werfen keine Schatten, die Außenspiegel werden im Wechsel aktualisiert. Stadtbäume brauchen weniger als die Hälfte der Dreiecke. Die Grafikstufe „Niedrig“ schaltet Schatten und Spiegel ab und verringert Bäume, Verkehr und Umland-Details.
 - **Sound** (`src/audio.js`): Diesel mit Obertönen, Nageln und Turbo, E-Motor-Surren, Abrollgeräusch, Druckluft, Türwarnton, Blinkerrelais, Haltewunsch-Gong, Hupe, Rückfahrwarner, Fahrscheindrucker
 
 ## Starten und Testen

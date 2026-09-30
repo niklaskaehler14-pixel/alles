@@ -24,14 +24,22 @@ ROAD.crossingCentre = ROAD.half + 4; // pedestrian crossing centre line from the
 ROAD.crossingWidth = 4;
 
 export const WORLD = {
-  margin: 700, // green land around the city
   groundY: 0.12,
 };
 
+// The drivable town area (with the green belt around the ring and the river in the south).
+// Everything beyond is landscape drawn by the backdrop.
+export function worldExtent(b) {
+  const riverZ0 = b.maxZ + ROAD.half + ROAD.sidewalk + 55;
+  const riverZ1 = riverZ0 + 60;
+  return { x0: b.minX - 150, x1: b.maxX + 150, z0: b.minZ - 260, z1: riverZ1 + 40, riverZ0, riverZ1 };
+}
+
+// backdrop: tree count, terrain texture size and grid spacing (m) of the landscape.
 export const QUALITY = {
-  low: { pixelRatio: 1.25, shadows: 0, trees: 0.5, pedestrians: 26, traffic: 14, mirrors: false, drawDistance: 700 },
-  medium: { pixelRatio: 1.6, shadows: 1024, trees: 0.8, pedestrians: 44, traffic: 22, mirrors: true, drawDistance: 1000 },
-  high: { pixelRatio: 2, shadows: 2048, trees: 1, pedestrians: 64, traffic: 30, mirrors: true, drawDistance: 1400 },
+  low: { pixelRatio: 1.25, shadows: 0, trees: 0.5, pedestrians: 26, traffic: 14, mirrors: false, backdrop: { trees: 1800, tex: 1024, step: 40 } },
+  medium: { pixelRatio: 1.6, shadows: 1024, trees: 0.8, pedestrians: 44, traffic: 22, mirrors: true, backdrop: { trees: 4500, tex: 2048, step: 30 } },
+  high: { pixelRatio: 2, shadows: 2048, trees: 1, pedestrians: 64, traffic: 30, mirrors: true, backdrop: { trees: 8000, tex: 2048, step: 24 } },
 };
 
 export const PHYSICS_DT = 1 / 120;

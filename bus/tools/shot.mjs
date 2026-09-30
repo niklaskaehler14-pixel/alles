@@ -27,7 +27,7 @@ await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ s
 await page.route('https://fonts.gstatic.com/**', (route) => route.abort());
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 page.on('console', (m) => console.log('console', m.text()));
-await page.goto(`http://localhost:${server.address().port}/${page0}`);
+await page.goto(`http://localhost:${server.address().port}/${page0}`, { timeout: 180000 });
 await page.waitForFunction(() => window.__done === true, null, { timeout: 240000 });
 await page.screenshot({ path: out });
 await browser.close();

@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>car viewer</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}</style></head>
+<body>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { Environment } from '../src/environment.js';
+import { TrafficView } from '../src/trafficView.js';
+import { CAR_TYPES } from '../src/traffic.js';
+const q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const env = new Environment(renderer, scene, { shadows: 2048 });
+env.set(q.get('time') || 'day');
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: '#4a4d52', roughness: 0.95 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+const tv = new TrafficView(20);
+scene.add(tv.group);
+const colors = ['#b8bcc0', '#1f3a5f', '#e7e7e4', '#7a1f24', '#efe6c9', '#3d5a44', '#8c9197', '#1d1f24'];
+const list = [
+  ['sedan', 0], ['sedan', 1], ['hatch', 0], ['suv', 0], ['taxi', 0], ['van', 0], ['truck', 0],
+];
+const vehicles = list.map(([type, uid], i) => ({ type, uid, x: (i - 3) * 4.2, z: 0, yaw: 0, pitch: 0, v: 0, spin: 0, color: type === 'taxi' ? '#efe6c9' : colors[i], indicator: i === 1 ? 1 : 0, braking: i % 2 === 0, hazard: false }));
+tv.update(vehicles, 0.016, { lights: !!q.get('lights') });
+const camera = new THREE.PerspectiveCamera(+(q.get('fov') || 40), innerWidth / innerHeight, 0.1, 2600);
+const [cx, cy, cz] = (q.get('cam') || '-9,2.2,9').split(',').map(Number);
+const [tx, ty, tz] = (q.get('look') || '-6,0.9,0').split(',').map(Number);
+camera.position.set(cx, cy, cz);
+camera.lookAt(tx, ty, tz);
+env.update(0, 0, new THREE.Vector3(tx, 0, tz), camera);
+renderer.info.autoReset = false;
+env.render(camera);
+renderer.info.reset();
+env.render(camera);
+console.log('calls', renderer.info.render.calls, 'triangles', renderer.info.render.triangles);
+window.__done = true;
+</script></body></html>

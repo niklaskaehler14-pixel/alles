@@ -24,8 +24,9 @@ export class CameraRig {
   set(mode) {
     this.mode = mode;
     this.smoothYaw = null;
+    this.snap = true; // jump straight to the new view instead of flying there
     this.camera.fov = mode === 'cockpit' ? 72 : 55;
-    this.camera.near = mode === 'cockpit' ? 0.05 : 0.2;
+    this.camera.near = mode === 'cockpit' ? 0.08 : 0.25;
     this.camera.updateProjectionMatrix();
   }
 
@@ -65,7 +66,10 @@ export class CameraRig {
       const back = len * 1.1 + 6 + (look.zoom || 0) * 1.5;
       const center = bus.localToWorld(0, bus.geo.center);
       this.pos.set(center[0] - sy * back, 6.2 + back * 0.12, center[1] - sc * back);
-      cam.position.lerp(this.pos, 1 - Math.exp(-dt * 6));
+      this.#avoidBuildings(center);
+      if (this.snap) cam.position.copy(this.pos);
+      else cam.position.lerp(this.pos, 1 - Math.exp(-dt * 6));
+      this.snap = false;
       this.target.set(center[0] + fx * 8, 1.8, center[1] + fz * 8);
       cam.lookAt(this.target);
     } else if (this.mode === 'orbit') {
@@ -76,7 +80,9 @@ export class CameraRig {
       const center = bus.localToWorld(0, bus.geo.center);
       const a = yaw + this.orbitYaw;
       const d = this.orbitDist;
-      cam.position.set(center[0] + Math.sin(a) * Math.cos(this.orbitPitch) * d, 1.5 + Math.sin(this.orbitPitch) * d, center[1] + Math.cos(a) * Math.cos(this.orbitPitch) * d);
+      this.pos.set(center[0] + Math.sin(a) * Math.cos(this.orbitPitch) * d, 1.5 + Math.sin(this.orbitPitch) * d, center[1] + Math.cos(a) * Math.cos(this.orbitPitch) * d);
+      this.#avoidBuildings(center);
+      cam.position.copy(this.pos);
       cam.lookAt(center[0], 1.4, center[1]);
     } else if (this.mode === 'top') {
       const center = bus.localToWorld(0, bus.geo.center + 2);
@@ -94,6 +100,27 @@ export class CameraRig {
     }
     look.dx = 0;
     look.dy = 0;
+  }
+
+  // Keep the camera out of houses: pull it in along the line to the bus (and a bit up).
+  // `blocked(x, z)` is set by the game (building footprints).
+  #avoidBuildings(center) {
+    if (!this.blocked) return;
+    const cx = center[0];
+    const cz = center[1];
+    let t = 1;
+    for (let k = 1; k <= 12; k++) {
+      const f = k / 12;
+      if (this.blocked(cx + (this.pos.x - cx) * f, cz + (this.pos.z - cz) * f)) {
+        t = Math.max(0.2, (k - 1.5) / 12);
+        break;
+      }
+    }
+    if (t < 1) {
+      this.pos.x = cx + (this.pos.x - cx) * t;
+      this.pos.z = cz + (this.pos.z - cz) * t;
+      this.pos.y += (1 - t) * 5;
+    }
   }
 
   resetLook() {

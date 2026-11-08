@@ -55,6 +55,12 @@ class LocalParserTest {
         assertNull(r[0].date)
     }
 
+    @Test fun getippterSatz() {
+        val d = LocalParser.parseOne("ich muss heute noch duschen gehen", today)!!
+        assertEquals("Duschen gehen", d.title)
+        assertEquals(today, d.date)
+    }
+
     @Test fun kiAntwortWirdGelesen() {
         val raw = """Hier: {"tasks":[{"title":"Duschen gehen","date":"2026-11-08","time":null,"durationMin":15,"notes":""},
             {"title":"Arzt","date":"2026-11-09","time":"09:00","durationMin":60,"notes":"Versichertenkarte"}]}"""

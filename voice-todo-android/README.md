@@ -10,9 +10,14 @@ Sag einfach, was ansteht – die App macht daraus saubere Aufgaben und trägt si
 - ✨ **KI-Auswertung (Claude)**: versteht den Zusammenhang, formuliert kurz um statt wörtlich abzuschreiben,
   erkennt Datum/Uhrzeit. Vorschau zum Abhaken, bevor etwas gespeichert wird.
 - 📴 **Offline-Modus** ohne API-Schlüssel: Regel-Parser für „heute/morgen/Freitag/um 18 Uhr/halb acht/am 3.12.“.
-- 📅 **Kalender**: Aufgaben mit Datum landen automatisch im Gerätekalender (Google/Samsung) inkl. Erinnerung 15 Min. vorher.
-- ➕ **Plus-Knopf** zum Eintippen mit Heute/Morgen/Datum/Uhrzeit.
-- 👆 Wischen nach rechts = erledigt, nach links = löschen (mit „Rückgängig“).
+- 📅 **Google Kalender in beide Richtungen**: Aufgaben mit Datum werden Termine (mit Erinnerung 15 Min. vorher).
+  Abhaken (✓ im Termin), Ändern und Löschen in der App wird übertragen. Verschiebst, umbenennst oder löschst du
+  den Termin in Google Kalender, übernimmt die App das beim nächsten Öffnen. Deine übrigen Termine der nächsten
+  7 Tage siehst du oben in der App (antippen öffnet Google Kalender). Kalender-Auswahl in ⚙️.
+- ➕ **Eingabeleiste unten**: „+ Aufgabe hinzufügen …“ antippen und einfach tippen, z. B. „ich muss heute noch
+  duschen gehen“ → live erkannt als **Duschen gehen · Heute**. Datum/Uhrzeit per Chip selbst setzen.
+  Mehrere Aufgaben in einem Satz → Vorschau zum Abhaken.
+- ✏️ Aufgabe antippen = bearbeiten · Kreis antippen = erledigt · nach links wischen = löschen (mit „Rückgängig“).
 - 🎨 Material 3, Verlauf-Design, passt sich ab Android 12 deinen Hintergrundfarben an, Dark Mode.
 
 ## Sprachassistenten

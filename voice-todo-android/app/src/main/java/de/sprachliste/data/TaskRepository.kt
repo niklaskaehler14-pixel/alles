@@ -26,6 +26,7 @@ class TaskRepository(context: Context) {
     fun add(tasks: List<Task>) = save(_tasks.value + tasks)
     fun update(task: Task) = save(_tasks.value.map { if (it.id == task.id) task else it })
     fun delete(id: String) = save(_tasks.value.filterNot { it.id == id })
+    fun replaceAll(list: List<Task>) = save(list)
 }
 
 /** Einfache Einstellungen. */
@@ -34,6 +35,10 @@ class Settings(context: Context) {
     var apiKey: String
         get() = prefs.getString("apiKey", "") ?: ""
         set(v) = prefs.edit().putString("apiKey", v.trim()).apply()
+    /** -1 = automatisch (Google-Hauptkalender). */
+    var calendarId: Long
+        get() = prefs.getLong("calendarId", -1L)
+        set(v) = prefs.edit().putLong("calendarId", v).apply()
     var addToCalendar: Boolean
         get() = prefs.getBoolean("calendar", true)
         set(v) = prefs.edit().putBoolean("calendar", v).apply()

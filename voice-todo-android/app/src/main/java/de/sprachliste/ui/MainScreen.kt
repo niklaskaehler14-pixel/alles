@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import de.sprachliste.data.CalendarEvent
 import de.sprachliste.data.Task
 import java.time.LocalDate
 import java.time.LocalTime
@@ -47,12 +48,15 @@ private fun group(tasks: List<Task>, today: LocalDate): List<Section> {
 @Composable
 fun MainScreen(
     tasks: List<Task>,
+    events: List<CalendarEvent>,
     snackbar: SnackbarHostState,
     onMic: () -> Unit,
     onPlus: () -> Unit,
     onSettings: () -> Unit,
     onToggle: (Task) -> Unit,
+    onEdit: (Task) -> Unit,
     onDelete: (Task) -> Unit,
+    onOpenEvent: (CalendarEvent) -> Unit,
 ) {
     val today = LocalDate.now()
     val sections = remember(tasks, today) { group(tasks, today) }
@@ -61,23 +65,11 @@ fun MainScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
-        floatingActionButton = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                SmallFloatingActionButton(onClick = onPlus, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Aufgabe eintippen")
-                }
-                Box(
-                    Modifier.size(72.dp).clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(Violet, Pink)))
-                        .clickable(onClick = onMic),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.Mic, "Aufgabe sprechen", tint = Color.White, modifier = Modifier.size(34.dp)) }
-            }
-        },
+        bottomBar = { InputBar(onPlus = onPlus, onMic = onMic) },
     ) { pad ->
         LazyColumn(
             Modifier.fillMaxSize().padding(pad),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 180.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
@@ -91,7 +83,8 @@ fun MainScreen(
                 }
             }
             item { ProgressCard(todayDone, todayAll.size) }
-            if (sections.isEmpty()) item { EmptyState() }
+            if (events.isNotEmpty()) item { CalendarStrip(events, today, onOpenEvent) }
+            if (sections.isEmpty() && events.isEmpty()) item { EmptyState() }
             sections.forEach { sec ->
                 item(key = "h_${sec.title}") {
                     Row(Modifier.padding(top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -103,7 +96,7 @@ fun MainScreen(
                     }
                 }
                 items(sec.tasks, key = { it.id }) { t ->
-                    SwipeTaskRow(t, sec.accent, today, onToggle, onDelete, Modifier.animateItem())
+                    SwipeTaskRow(t, sec.accent, today, onToggle, onEdit, onDelete, Modifier.animateItem())
                 }
             }
         }
@@ -137,7 +130,7 @@ private fun ProgressCard(done: Int, total: Int) {
                     color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(6.dp))
-                Text("Tippe aufs Mikro und sag einfach, was ansteht.", color = Color.White.copy(alpha = 0.85f),
+                Text("Tippe unten auf + oder sag einfach, was ansteht.", color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodySmall)
             }
             Box(contentAlignment = Alignment.Center) {
@@ -165,7 +158,7 @@ private fun EmptyState() {
 @Composable
 private fun SwipeTaskRow(
     task: Task, accent: Color, today: LocalDate,
-    onToggle: (Task) -> Unit, onDelete: (Task) -> Unit, modifier: Modifier,
+    onToggle: (Task) -> Unit, onEdit: (Task) -> Unit, onDelete: (Task) -> Unit, modifier: Modifier,
 ) {
     val state = rememberSwipeToDismissBoxState(confirmValueChange = {
         when (it) {
@@ -185,17 +178,17 @@ private fun SwipeTaskRow(
                 contentAlignment = if (toDelete) Alignment.CenterEnd else Alignment.CenterStart,
             ) { Icon(if (toDelete) Icons.Rounded.Delete else Icons.Rounded.Check, null) }
         },
-    ) { TaskCard(task, accent, today, onToggle) }
+    ) { TaskCard(task, accent, today, onToggle, onEdit) }
 }
 
 @Composable
-private fun TaskCard(task: Task, accent: Color, today: LocalDate, onToggle: (Task) -> Unit) {
+private fun TaskCard(task: Task, accent: Color, today: LocalDate, onToggle: (Task) -> Unit, onEdit: (Task) -> Unit) {
     val bg by animateColorAsState(
         if (task.done) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer, label = "bg")
     Surface(color = bg, shape = RoundedCornerShape(20.dp), tonalElevation = 1.dp, shadowElevation = if (task.done) 0.dp else 1.dp) {
-        Row(Modifier.fillMaxWidth().clickable { onToggle(task) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().clickable { onEdit(task) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(26.dp).clip(CircleShape)
+                Modifier.size(26.dp).clip(CircleShape).clickable { onToggle(task) }
                     .background(if (task.done) accent else Color.Transparent)
                     .then(if (task.done) Modifier else Modifier.background(accent.copy(alpha = 0.15f))),
                 contentAlignment = Alignment.Center,
@@ -223,6 +216,67 @@ private fun TaskCard(task: Task, accent: Color, today: LocalDate, onToggle: (Tas
                     }
                     if (task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** Eingabeleiste unten: Plus zum Eintippen, Mikro zum Sprechen. */
+@Composable
+private fun InputBar(onPlus: () -> Unit, onMic: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp, shadowElevation = 8.dp) {
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                onClick = onPlus, shape = RoundedCornerShape(26.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.weight(1f).height(52.dp),
+            ) {
+                Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(30.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Violet, Pink))),
+                        contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Add, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text("Aufgabe hinzufügen …", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            FilledTonalIconButton(onClick = onMic, modifier = Modifier.size(52.dp)) {
+                Icon(Icons.Rounded.Mic, "Aufgabe sprechen")
+            }
+        }
+    }
+}
+
+/** Termine aus Google Kalender (Heute/Morgen …) als waagrechte Leiste. */
+@Composable
+private fun CalendarStrip(events: List<CalendarEvent>, today: LocalDate, onOpen: (CalendarEvent) -> Unit) {
+    Column(Modifier.padding(top = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Event, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(6.dp))
+            Text("Aus deinem Kalender", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(8.dp))
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(events.take(20), key = { "${it.id}_${it.date}" }) { e ->
+                Surface(onClick = { onOpen(e) }, shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 1.dp,
+                    modifier = Modifier.widthIn(min = 140.dp, max = 220.dp)) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(4.dp).height(36.dp).clip(CircleShape).background(Color(e.color or 0xFF000000.toInt())))
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(e.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium,
+                                style = MaterialTheme.typography.bodyMedium)
+                            Text(formatWhen(e.date, e.time, today) ?: "", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             }
         }

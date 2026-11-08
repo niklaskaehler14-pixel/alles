@@ -25,14 +25,24 @@ class MainActivity : ComponentActivity() {
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) vm.startListening() else vm.analyzeDenied()
     }
-    private val calendarPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+    private val calendarPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        calendarPermissionTick.intValue++
+        vm.syncFromCalendar()
+    }
+    private val calendarPermissionTick = mutableIntStateOf(0)
+
+    override fun onResume() {
+        super.onResume()
+        vm.syncFromCalendar() // Änderungen aus Google Kalender übernehmen
+    }
+
+    private fun requestCalendar() =
+        calendarPermission.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (vm.settings.addToCalendar && !granted(Manifest.permission.WRITE_CALENDAR)) {
-            calendarPermission.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
-        }
+        if (vm.settings.addToCalendar && !vm.calendar.hasPermission()) requestCalendar()
         if (savedInstanceState == null) handleIntent(intent)
 
         setContent {
@@ -41,42 +51,68 @@ class MainActivity : ComponentActivity() {
                 val flow by vm.flow.collectAsStateWithLifecycle()
                 val speech by vm.speech.state.collectAsStateWithLifecycle()
                 val message by vm.message.collectAsStateWithLifecycle()
+                val events by vm.events.collectAsStateWithLifecycle()
                 val snackbar = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
-                var showAdd by remember { mutableStateOf(false) }
+                var sheet by remember { mutableStateOf<EditTarget?>(null) }
                 var showSettings by remember { mutableStateOf(false) }
 
                 LaunchedEffect(message) {
                     message?.let { snackbar.showSnackbar(it); vm.consumeMessage() }
                 }
+                val deleteWithUndo: (Task) -> Unit = { t ->
+                    vm.delete(t)
+                    scope.launch {
+                        val r = snackbar.showSnackbar("„${t.title}“ gelöscht", "Rückgängig", duration = SnackbarDuration.Short)
+                        if (r == SnackbarResult.ActionPerformed) vm.restore(t)
+                    }
+                }
 
                 MainScreen(
-                    tasks = tasks, snackbar = snackbar,
-                    onMic = ::startVoice, onPlus = { showAdd = true }, onSettings = { showSettings = true },
-                    onToggle = vm::toggle,
-                    onDelete = { t: Task ->
-                        vm.delete(t)
-                        scope.launch {
-                            val r = snackbar.showSnackbar("„${t.title}“ gelöscht", "Rückgängig", duration = SnackbarDuration.Short)
-                            if (r == SnackbarResult.ActionPerformed) vm.restore(t)
-                        }
-                    },
+                    tasks = tasks, events = events, snackbar = snackbar,
+                    onMic = ::startVoice, onPlus = { sheet = EditTarget(null) }, onSettings = { showSettings = true },
+                    onToggle = vm::toggle, onEdit = { sheet = EditTarget(it) }, onDelete = deleteWithUndo,
+                    onOpenEvent = { e -> runCatching { startActivity(vm.calendar.openIntent(e.id)) } },
                 )
                 if (flow != VoiceFlow.Idle) {
                     VoiceSheet(flow, speech, onDone = vm::finishListening, onCancel = vm::cancelVoice,
                         onAccept = vm::accept, onRetry = { vm.cancelVoice(); startVoice() })
                 }
-                if (showAdd) AddTaskSheet(onDismiss = { showAdd = false }, onSave = { vm.addManual(it); showAdd = false })
-                if (showSettings) SettingsDialog(vm.settings.apiKey, vm.settings.addToCalendar,
-                    onDismiss = { showSettings = false },
-                    onSave = { key, cal ->
-                        vm.settings.apiKey = key; vm.settings.addToCalendar = cal; showSettings = false
-                        if (cal && !granted(Manifest.permission.WRITE_CALENDAR)) calendarPermission.launch(
-                            arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
-                    })
+                sheet?.let { st ->
+                    TaskSheet(
+                        editing = st.editing,
+                        onDismiss = { sheet = null },
+                        onSave = { text, draft, autoDetect ->
+                            sheet = null
+                            val e = st.editing
+                            if (e == null) vm.submitTyped(text, draft, autoDetect)
+                            else vm.save(e.copy(title = draft.title, date = draft.date, time = draft.time, notes = draft.notes))
+                        },
+                        onDelete = { t -> sheet = null; deleteWithUndo(t) },
+                    )
+                }
+                if (showSettings) {
+                    val tick = calendarPermissionTick.intValue
+                    val calendars = remember(tick) { vm.calendars() }
+                    SettingsDialog(
+                        apiKey = vm.settings.apiKey, calendarOn = vm.settings.addToCalendar,
+                        calendarId = vm.settings.calendarId, calendars = calendars,
+                        hasCalendarPermission = remember(tick) { vm.calendar.hasPermission() },
+                        onRequestPermission = ::requestCalendar,
+                        onDismiss = { showSettings = false },
+                        onSave = { key, cal, calId ->
+                            vm.settings.apiKey = key; vm.settings.addToCalendar = cal; vm.settings.calendarId = calId
+                            showSettings = false
+                            if (cal && !vm.calendar.hasPermission()) requestCalendar() else vm.syncFromCalendar()
+                        },
+                    )
+                }
             }
         }
     }
+
+    /** Welche Aufgabe gerade im Eingabe-Fenster ist (null = neue Aufgabe). */
+    private data class EditTarget(val editing: Task?)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)

@@ -26,6 +26,14 @@ import androidx.compose.ui.unit.dp
 import de.sprachliste.VoiceFlow
 import de.sprachliste.ai.SpeechState
 import de.sprachliste.data.TaskDraft
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.ImeAction
+import de.sprachliste.ai.LocalParser
+import de.sprachliste.data.CalendarInfo
+import de.sprachliste.data.Task
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -132,43 +140,118 @@ private fun Review(flow: VoiceFlow.Review, onAccept: (List<TaskDraft>) -> Unit, 
     if (drafts.isEmpty()) TextButton(onClick = onCancel) { Text("Schließen") }
 }
 
+private enum class DateMode { AUTO, TODAY, TOMORROW, PICKED, NONE }
+
+/**
+ * Neue Aufgabe eintippen oder bestehende bearbeiten.
+ * Beim Tippen wird live erkannt: "ich muss heute noch duschen gehen" → Duschen gehen · Heute.
+ * Datum/Uhrzeit lassen sich jederzeit per Chip selbst festlegen.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddTaskSheet(onDismiss: () -> Unit, onSave: (TaskDraft) -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf<LocalDate?>(LocalDate.now()) }
-    var time by remember { mutableStateOf<LocalTime?>(null) }
+fun TaskSheet(
+    editing: Task?,
+    onDismiss: () -> Unit,
+    onSave: (text: String, draft: TaskDraft, autoDetect: Boolean) -> Unit,
+    onDelete: (Task) -> Unit,
+) {
+    val today = LocalDate.now()
+    var text by remember { mutableStateOf(editing?.title ?: "") }
+    var notes by remember { mutableStateOf(editing?.notes ?: "") }
+    var mode by remember { mutableStateOf(
+        when {
+            editing == null -> DateMode.AUTO
+            editing.date == null -> DateMode.NONE
+            else -> DateMode.PICKED
+        }) }
+    var picked by remember { mutableStateOf(editing?.date ?: today) }
+    // null = automatisch/keine; manualTime gesetzt = vom Nutzer gewählt
+    var manualTime by remember { mutableStateOf(editing?.time) }
+    var timeTouched by remember { mutableStateOf(editing != null) }
     var showDate by remember { mutableStateOf(false) }
     var showTime by remember { mutableStateOf(false) }
-    val today = LocalDate.now()
+    val focus = remember { FocusRequester() }
+
+    val auto = editing == null
+    val parsed = remember(text) { if (auto) LocalParser.parseOne(text, today) else null }
+    val multi = remember(text) { auto && LocalParser.parse(text, today).size > 1 }
+    val title = (parsed?.title ?: text.trim()).replaceFirstChar { it.uppercase() }
+    val date: LocalDate? = when (mode) {
+        DateMode.AUTO -> parsed?.date
+        DateMode.TODAY -> today
+        DateMode.TOMORROW -> today.plusDays(1)
+        DateMode.PICKED -> picked
+        DateMode.NONE -> null
+    }
+    val time: LocalTime? = if (date == null) null else if (timeTouched) manualTime else parsed?.time
+
+    LaunchedEffect(Unit) { if (editing == null) focus.requestFocus() }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
-            Text("Neue Aufgabe", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Was steht an?") },
-                singleLine = true, shape = RoundedCornerShape(16.dp),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp).imePadding()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (editing == null) "Neue Aufgabe" else "Aufgabe bearbeiten",
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                if (editing != null) IconButton(onClick = { onDelete(editing) }) {
+                    Icon(Icons.Rounded.Delete, "Löschen", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                text, { text = it }, Modifier.fillMaxWidth().focusRequester(focus),
+                placeholder = { Text("z. B. Ich muss heute noch duschen gehen") },
+                shape = RoundedCornerShape(16.dp), maxLines = 4,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    if (title.isNotBlank()) onSave(text, TaskDraft(title, date, time, editing?.durationMin ?: 30, notes), auto && mode == DateMode.AUTO)
+                }),
+            )
+            // Live-Vorschau, was gespeichert wird
+            if (auto && text.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (multi) "Mehrere Aufgaben erkannt – du bekommst gleich eine Vorschau"
+                            else listOfNotNull(title.ifBlank { null }, formatWhen(date, time, today)).joinToString(" · "),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(14.dp))
+            Text("Wann?", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (auto) FilterChip(mode == DateMode.AUTO, { mode = DateMode.AUTO }, { Text("Automatisch") },
+                    leadingIcon = { Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp)) })
+                FilterChip(date == today && mode != DateMode.AUTO, { mode = DateMode.TODAY }, { Text("Heute") })
+                FilterChip(date == today.plusDays(1) && mode != DateMode.AUTO, { mode = DateMode.TOMORROW }, { Text("Morgen") })
+                FilterChip(mode == DateMode.PICKED && picked != today && picked != today.plusDays(1), { showDate = true },
+                    { Text(if (mode == DateMode.PICKED && picked != today && picked != today.plusDays(1)) formatWhen(picked, null, today)!! else "Datum …") },
+                    leadingIcon = { Icon(Icons.Rounded.CalendarMonth, null, Modifier.size(16.dp)) })
+                FilterChip(mode == DateMode.NONE, { mode = DateMode.NONE }, { Text("Ohne Datum") })
+            }
+            Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(date == today, { date = today }, { Text("Heute") })
-                FilterChip(date == today.plusDays(1), { date = today.plusDays(1) }, { Text("Morgen") })
-                FilterChip(date != null && date != today && date != today.plusDays(1), { showDate = true },
-                    { Text(if (date != null && date != today && date != today.plusDays(1)) formatWhen(date, null)!! else "Datum") },
-                    leadingIcon = { Icon(Icons.Rounded.CalendarMonth, null, Modifier.size(18.dp)) })
-                FilterChip(date == null, { date = null; time = null }, { Text("Ohne") })
+                AssistChip(onClick = { if (date == null) { mode = DateMode.TODAY }; showTime = true },
+                    label = { Text(time?.let { "%02d:%02d Uhr".format(it.hour, it.minute) } ?: "Uhrzeit") },
+                    leadingIcon = { Icon(Icons.Rounded.Schedule, null, Modifier.size(16.dp)) })
+                if (time != null) AssistChip(onClick = { manualTime = null; timeTouched = true },
+                    label = { Text("Ganztägig") }, leadingIcon = { Icon(Icons.Rounded.Close, null, Modifier.size(16.dp)) })
             }
-            Spacer(Modifier.height(8.dp))
-            AssistChip(onClick = { if (date == null) date = today; showTime = true },
-                label = { Text(time?.let { "%02d:%02d Uhr".format(it.hour, it.minute) } ?: "Uhrzeit hinzufügen") },
-                leadingIcon = { Icon(Icons.Rounded.Schedule, null, Modifier.size(18.dp)) },
-                trailingIcon = if (time != null) ({ Icon(Icons.Rounded.Close, "Uhrzeit entfernen",
-                    Modifier.size(18.dp).clip(CircleShape).clickable { time = null }) }) else null)
-            Spacer(Modifier.height(20.dp))
-            Button(onClick = { onSave(TaskDraft(title.trim().replaceFirstChar { it.uppercase() }, date, time)) },
-                enabled = title.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) {
-                Text("Hinzufügen")
+            if (editing != null) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = { Text("Notiz") },
+                    shape = RoundedCornerShape(16.dp), maxLines = 3)
             }
+            Spacer(Modifier.height(18.dp))
+            Button(
+                onClick = { onSave(text, TaskDraft(title, date, time, editing?.durationMin ?: 30, notes), auto && mode == DateMode.AUTO) },
+                enabled = title.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp),
+            ) { Text(when { editing != null -> "Speichern"; multi -> "Aufgaben prüfen"; else -> "Hinzufügen" }) }
         }
     }
 
@@ -177,44 +260,77 @@ fun AddTaskSheet(onDismiss: () -> Unit, onSave: (TaskDraft) -> Unit) {
             (date ?: today).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
         DatePickerDialog(onDismissRequest = { showDate = false },
             confirmButton = { TextButton({
-                st.selectedDateMillis?.let { date = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
+                st.selectedDateMillis?.let { picked = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate(); mode = DateMode.PICKED }
                 showDate = false }) { Text("OK") } },
             dismissButton = { TextButton({ showDate = false }) { Text("Abbrechen") } }) { DatePicker(st) }
     }
     if (showTime) {
         val st = rememberTimePickerState(time?.hour ?: 18, time?.minute ?: 0, is24Hour = true)
         AlertDialog(onDismissRequest = { showTime = false },
-            confirmButton = { TextButton({ time = LocalTime.of(st.hour, st.minute); showTime = false }) { Text("OK") } },
+            confirmButton = { TextButton({
+                manualTime = LocalTime.of(st.hour, st.minute); timeTouched = true
+                if (mode == DateMode.AUTO && parsed?.date == null) mode = DateMode.TODAY
+                showTime = false }) { Text("OK") } },
             dismissButton = { TextButton({ showTime = false }) { Text("Abbrechen") } },
             text = { TimePicker(st) })
     }
 }
 
 @Composable
-fun SettingsDialog(apiKey: String, calendar: Boolean, onDismiss: () -> Unit, onSave: (String, Boolean) -> Unit) {
+fun SettingsDialog(
+    apiKey: String, calendarOn: Boolean, calendarId: Long, calendars: List<CalendarInfo>, hasCalendarPermission: Boolean,
+    onRequestPermission: () -> Unit, onDismiss: () -> Unit, onSave: (String, Boolean, Long) -> Unit,
+) {
     var key by remember { mutableStateOf(apiKey) }
-    var cal by remember { mutableStateOf(calendar) }
+    var cal by remember { mutableStateOf(calendarOn) }
+    var calId by remember { mutableStateOf(calendars.firstOrNull { it.id == calendarId }?.id ?: calendars.firstOrNull()?.id ?: -1L) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Einstellungen") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("KI-Auswertung (Claude): Mit einem Anthropic-API-Schlüssel versteht die App auch lange, " +
-                    "chaotische Sätze. Ohne Schlüssel wird offline mit einfachen Regeln ausgewertet.",
-                    style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(key, { key = it }, label = { Text("API-Schlüssel (sk-ant-…)") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("In Kalender eintragen")
-                        Text("Aufgaben mit Datum landen im Google-/Samsung-Kalender",
+                        Text("Mit Google Kalender verbinden", fontWeight = FontWeight.SemiBold)
+                        Text("Aufgaben mit Datum erscheinen als Termin. Abhaken, Ändern und Löschen wird übertragen – " +
+                            "und Änderungen im Kalender kommen zurück in die App.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(cal, { cal = it })
                 }
+                if (cal && !hasCalendarPermission) {
+                    OutlinedButton(onClick = onRequestPermission) { Text("Kalenderzugriff erlauben") }
+                }
+                if (cal && calendars.isNotEmpty()) {
+                    Text("In welchen Kalender?", style = MaterialTheme.typography.labelLarge)
+                    calendars.forEach { c ->
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { calId = c.id },
+                            verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(calId == c.id, { calId = c.id })
+                            Box(Modifier.size(10.dp).clip(CircleShape).background(Color(c.color or 0xFF000000.toInt())))
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(c.name, style = MaterialTheme.typography.bodyMedium)
+                                Text(if (c.isGoogle) "Google · ${c.account}" else c.account,
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                if (cal && hasCalendarPermission && calendars.none { it.isGoogle }) {
+                    Text("Kein Google-Konto gefunden. Füge es unter Android-Einstellungen → Konten hinzu " +
+                        "und aktiviere dort „Kalender synchronisieren“.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                HorizontalDivider()
+                Text("KI-Auswertung (Claude)", fontWeight = FontWeight.SemiBold)
+                Text("Mit einem Anthropic-API-Schlüssel versteht die App auch lange, chaotische Sätze. " +
+                    "Ohne Schlüssel wird offline mit einfachen Regeln ausgewertet.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(key, { key = it }, label = { Text("API-Schlüssel (sk-ant-…)") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
             }
         },
-        confirmButton = { TextButton({ onSave(key, cal) }) { Text("Speichern") } },
+        confirmButton = { TextButton({ onSave(key, cal, calId) }) { Text("Speichern") } },
         dismissButton = { TextButton(onDismiss) { Text("Abbrechen") } },
     )
 }

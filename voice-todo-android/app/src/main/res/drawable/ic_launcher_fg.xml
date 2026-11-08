@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Mikrofon mit Haken -->
+    <path android:fillColor="#FFFFFF" android:pathData="M54,30a9,9 0,0 1,9 9v14a9,9 0,0 1,-18 0V39a9,9 0,0 1,9 -9z"/>
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M40,52a14,14 0,0 0,28 0M54,66v10M46,78h16"/>
+    <path android:fillColor="#E85AAD" android:pathData="M72,64m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"/>
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="#00000000" android:pathData="M67.5,64l3,3l6,-6"/>
+</vector>

@@ -1,6 +1,5 @@
 package de.sprachliste.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -201,7 +200,7 @@ private fun TaskCard(task: Task, accent: Color, today: LocalDate, onToggle: (Tas
                     .then(if (task.done) Modifier else Modifier.background(accent.copy(alpha = 0.15f))),
                 contentAlignment = Alignment.Center,
             ) {
-                AnimatedVisibility(task.done) { Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.size(18.dp)) }
+                if (task.done) Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {

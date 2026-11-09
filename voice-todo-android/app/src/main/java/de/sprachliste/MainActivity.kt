@@ -9,6 +9,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -56,6 +59,7 @@ class MainActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
                 var sheet by remember { mutableStateOf<EditTarget?>(null) }
                 var showSettings by remember { mutableStateOf(false) }
+                var confirmClear by remember { mutableStateOf(false) }
 
                 LaunchedEffect(message) {
                     message?.let { snackbar.showSnackbar(it); vm.consumeMessage() }
@@ -72,6 +76,7 @@ class MainActivity : ComponentActivity() {
                     tasks = tasks, events = events, snackbar = snackbar,
                     onMic = ::startVoice, onPlus = { sheet = EditTarget(null) }, onSettings = { showSettings = true },
                     onToggle = vm::toggle, onEdit = { sheet = EditTarget(it) }, onDelete = deleteWithUndo,
+                    onClearDone = { confirmClear = true },
                     onOpenEvent = { e -> runCatching { startActivity(vm.calendar.openIntent(e.id)) } },
                 )
                 if (flow != VoiceFlow.Idle) {
@@ -89,6 +94,15 @@ class MainActivity : ComponentActivity() {
                             else vm.save(e.copy(title = draft.title, date = draft.date, time = draft.time, notes = draft.notes))
                         },
                         onDelete = { t -> sheet = null; deleteWithUndo(t) },
+                    )
+                }
+                if (confirmClear) {
+                    AlertDialog(
+                        onDismissRequest = { confirmClear = false },
+                        title = { Text("Erledigte löschen?") },
+                        text = { Text("Alle erledigten Aufgaben werden entfernt – auch aus dem Kalender.") },
+                        confirmButton = { TextButton({ confirmClear = false; vm.clearDone() }) { Text("Löschen") } },
+                        dismissButton = { TextButton({ confirmClear = false }) { Text("Abbrechen") } },
                     )
                 }
                 if (showSettings) {

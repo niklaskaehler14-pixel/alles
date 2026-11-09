@@ -61,6 +61,33 @@ class LocalParserTest {
         assertEquals(today, d.date)
     }
 
+    @Test fun inDreiTagen() {
+        val d = LocalParser.parseOne("in 3 Tagen Paket abholen", today)!!
+        assertEquals("Paket abholen", d.title); assertEquals(today.plusDays(3), d.date)
+        val w = LocalParser.parseOne("in zwei Wochen Auto zum TÜV bringen", today)!!
+        assertEquals("Auto zum TÜV bringen", w.title); assertEquals(today.plusWeeks(2), w.date)
+    }
+
+    @Test fun naechsteWocheUndWochenende() {
+        val d = LocalParser.parseOne("nächste Woche Steuererklärung machen", today)!!
+        assertEquals("Steuererklärung machen", d.title); assertEquals(today.plusWeeks(1), d.date)
+        val friday = LocalDate.of(2026, 11, 13)
+        val w = LocalParser.parseOne("am Wochenende Keller aufräumen", friday)!!
+        assertEquals("Keller aufräumen", w.title); assertEquals(LocalDate.of(2026, 11, 14), w.date)
+    }
+
+    @Test fun uebernaechsterFreitag() {
+        val d = LocalParser.parseOne("übernächsten Freitag Friseur", today)!!
+        assertEquals("Friseur", d.title); assertEquals(LocalDate.of(2026, 11, 20), d.date)
+    }
+
+    @Test fun zahlenBleibenImTitel() {
+        val d = LocalParser.parseOne("in 3 Minuten Nudeln abgießen", today)!!
+        assertEquals("In 3 Minuten Nudeln abgießen", d.title)
+        val e = LocalParser.parseOne("2 Liter Milch kaufen", today)!!
+        assertEquals("2 Liter Milch kaufen", e.title); assertNull(e.time)
+    }
+
     @Test fun kiAntwortWirdGelesen() {
         val raw = """Hier: {"tasks":[{"title":"Duschen gehen","date":"2026-11-08","time":null,"durationMin":15,"notes":""},
             {"title":"Arzt","date":"2026-11-09","time":"09:00","durationMin":60,"notes":"Versichertenkarte"}]}"""

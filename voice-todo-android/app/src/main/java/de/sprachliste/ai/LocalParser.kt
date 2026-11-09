@@ -60,11 +60,22 @@ object LocalParser {
         if (date == null) cut(Regex("""(?i)\s(morgen)(?!\s*früh)\s""")) { date = today.plusDays(1) }
         if (date == null) cut(Regex("""(?i)\s(morgen\s+früh)\s""")) { date = today.plusDays(1); time = LocalTime.of(8, 0) }
         if (date == null) cut(Regex("""(?i)\s(heute(?:\s+noch)?|gleich|nachher|jetzt)\s""")) { date = today }
+        if (date == null) cut(Regex("""(?i)\s(?:am\s+)?übernächsten\s+(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\s""")) { m ->
+            date = today.with(TemporalAdjusters.next(weekdays.getValue(m.groupValues[1].lowercase()))).plusWeeks(1)
+        }
         if (date == null) cut(Regex("""(?i)\s(?:am\s+|nächsten\s+|kommenden\s+|diesen\s+)?(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\s""")) { m ->
             val dow = weekdays.getValue(m.groupValues[1].lowercase())
             date = today.with(TemporalAdjusters.next(dow))
         }
-        if (date == null) cut(Regex("""(?i)\s(?:in\s+)?(?:einer|der nächsten)\s+woche\s""")) { date = today.plusWeeks(1) }
+        if (date == null) cut(Regex("""(?i)\sin\s+(\d{1,3}|\w+)\s+(tag|tagen|woche|wochen)\s""")) { m ->
+            val n = m.groupValues[1].lowercase().let { it.toIntOrNull() ?: numberWords[it] ?: if (it == "einem" || it == "einer") 1 else null }
+            if (n != null) date = if (m.groupValues[2].lowercase().startsWith("tag")) today.plusDays(n.toLong()) else today.plusWeeks(n.toLong())
+        }
+        if (date == null) cut(Regex("""(?i)\s(?:in\s+der\s+|die\s+)?(?:nächsten?|kommenden?)\s+woche\s""")) { date = today.plusWeeks(1) }
+        if (date == null) cut(Regex("""(?i)\s(?:am|dieses|übers)\s+wochenende\s""")) {
+            date = if (today.dayOfWeek == DayOfWeek.SATURDAY || today.dayOfWeek == DayOfWeek.SUNDAY) today
+            else today.with(TemporalAdjusters.next(DayOfWeek.SATURDAY))
+        }
 
         // Uhrzeit
         cut(Regex("""(?i)\s(?:um\s+|gegen\s+|ab\s+)?(\d{1,2})(?::(\d{2})|\s*uhr\s*(\d{1,2})?)\s*(?:uhr)?\s""")) { m ->

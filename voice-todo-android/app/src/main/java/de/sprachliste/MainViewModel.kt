@@ -46,7 +46,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val events = _events.asStateFlow()
 
     fun consumeMessage() { _message.value = null }
-    fun analyzeDenied() { _message.value = "Ohne Mikrofon-Berechtigung kann ich nicht zuhören – nutze das Plus" }
+    fun analyzeDenied() { _message.value = "Für die Aufnahme wird der Mikrofonzugriff benötigt" }
 
     private val calendarOn get() = settings.addToCalendar && calendar.hasPermission()
 
@@ -59,7 +59,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun finishListening() {
         val text = speech.stop()
-        if (text.isBlank()) { cancelVoice(); _message.value = "Nichts verstanden – versuch's nochmal"; return }
+        if (text.isBlank()) { cancelVoice(); _message.value = "Es wurde nichts erkannt"; return }
         analyze(text)
     }
 
@@ -97,7 +97,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val inCal = withCal.count { it.calendarEventId != null }
             _message.value = buildString {
                 append(if (list.size == 1) "„${list[0].title}“ hinzugefügt" else "${list.size} Aufgaben hinzugefügt")
-                if (inCal > 0) append(" · im Google Kalender")
+                if (inCal > 0) append(" · im Kalender")
             }
             refreshEvents()
         }
@@ -126,6 +126,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun delete(task: Task) {
         repo.delete(task.id)
         task.calendarEventId?.let { id -> viewModelScope.launch(Dispatchers.IO) { calendar.delete(id); refreshEvents() } }
+    }
+
+    /** Entfernt alle erledigten Aufgaben (samt ihrer Kalendertermine). */
+    fun clearDone() {
+        val done = repo.tasks.value.filter { it.done }
+        if (done.isEmpty()) return
+        repo.replaceAll(repo.tasks.value.filterNot { it.done })
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { done.mapNotNull { it.calendarEventId }.forEach(calendar::delete) }
+            _message.value = if (done.size == 1) "1 erledigte Aufgabe gelöscht" else "${done.size} erledigte Aufgaben gelöscht"
+            refreshEvents()
+        }
     }
 
     fun restore(task: Task) = addTasks(listOf(task.copy(calendarEventId = null)))

@@ -9,7 +9,7 @@ Sag einfach, was ansteht – die App macht daraus saubere Aufgaben und trägt si
 - 🎙️ **Großer Mikro-Knopf**: Dauer-Diktat – rede so lange du willst (auch 15 Minuten), tippe dann auf *Fertig*.
 - ✨ **KI-Auswertung (Claude)**: versteht den Zusammenhang, formuliert kurz um statt wörtlich abzuschreiben,
   erkennt Datum/Uhrzeit. Vorschau zum Abhaken, bevor etwas gespeichert wird.
-- 📴 **Offline-Modus** ohne API-Schlüssel: Regel-Parser für „heute/morgen/Freitag/um 18 Uhr/halb acht/am 3.12.“.
+- 📴 **Offline-Modus** ohne API-Schlüssel: Regel-Parser für „heute/morgen/Freitag/in 3 Tagen/nächste Woche/am Wochenende/um 18 Uhr/halb acht/am 3.12.“.
 - 📅 **Google Kalender in beide Richtungen**: Aufgaben mit Datum werden Termine (mit Erinnerung 15 Min. vorher).
   Abhaken (✓ im Termin), Ändern und Löschen in der App wird übertragen. Verschiebst, umbenennst oder löschst du
   den Termin in Google Kalender, übernimmt die App das beim nächsten Öffnen. Deine übrigen Termine der nächsten
@@ -18,7 +18,8 @@ Sag einfach, was ansteht – die App macht daraus saubere Aufgaben und trägt si
   duschen gehen“ → live erkannt als **Duschen gehen · Heute**. Datum/Uhrzeit per Chip selbst setzen.
   Mehrere Aufgaben in einem Satz → Vorschau zum Abhaken.
 - ✏️ Aufgabe antippen = bearbeiten · Kreis antippen = erledigt · nach links wischen = löschen (mit „Rückgängig“).
-- 🎨 Material 3, Verlauf-Design, passt sich ab Android 12 deinen Hintergrundfarben an, Dark Mode.
+- **Design**: ruhig und aufgeräumt – neutrale Farben, eine Akzentfarbe, gruppierte Listen, heller und dunkler Modus.
+- **Erledigt** ist einklappbar und lässt sich mit einem Tipp aufräumen; Überfälliges ist rot markiert.
 
 ## Sprachassistenten
 | Assistent | So geht's |

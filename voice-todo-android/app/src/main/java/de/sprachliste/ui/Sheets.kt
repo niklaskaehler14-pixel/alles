@@ -174,6 +174,7 @@ private enum class DateMode { AUTO, TODAY, TOMORROW, PICKED, NONE }
 @Composable
 fun TaskSheet(
     editing: Task?,
+    initialDate: LocalDate? = null,
     onDismiss: () -> Unit,
     onSave: (text: String, draft: TaskDraft, autoDetect: Boolean) -> Unit,
     onDelete: (Task) -> Unit,
@@ -183,11 +184,12 @@ fun TaskSheet(
     var notes by remember { mutableStateOf(editing?.notes ?: "") }
     var mode by remember { mutableStateOf(
         when {
+            editing == null && initialDate != null -> DateMode.PICKED
             editing == null -> DateMode.AUTO
             editing.date == null -> DateMode.NONE
             else -> DateMode.PICKED
         }) }
-    var picked by remember { mutableStateOf(editing?.date ?: today) }
+    var picked by remember { mutableStateOf(editing?.date ?: initialDate ?: today) }
     // null = automatisch/keine; manualTime gesetzt = vom Nutzer gewählt
     var manualTime by remember { mutableStateOf(editing?.time) }
     var timeTouched by remember { mutableStateOf(editing != null) }

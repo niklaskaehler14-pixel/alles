@@ -3,6 +3,8 @@ package de.sprachliste.ai
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -28,6 +30,9 @@ data class SpeechState(
 class SpeechController(private val context: Context) {
     private var recognizer: SpeechRecognizer? = null
     private var keepGoing = false
+    private val handler = Handler(Looper.getMainLooper())
+    /** Aufeinanderfolgende technische Fehler ohne dass etwas erkannt wurde. */
+    private var failures = 0
     private val _state = MutableStateFlow(SpeechState())
     val state: StateFlow<SpeechState> = _state.asStateFlow()
 
@@ -35,6 +40,7 @@ class SpeechController(private val context: Context) {
 
     fun start() {
         keepGoing = true
+        failures = 0
         _state.value = SpeechState(listening = true)
         listen()
     }
@@ -42,6 +48,7 @@ class SpeechController(private val context: Context) {
     /** Beendet das Diktat und liefert den gesamten Text. */
     fun stop(): String {
         keepGoing = false
+        handler.removeCallbacksAndMessages(null)
         recognizer?.stopListening()
         recognizer?.destroy(); recognizer = null
         val text = _state.value.fullText
@@ -57,24 +64,28 @@ class SpeechController(private val context: Context) {
         recognizer = r
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() { failures = 0 }
             override fun onRmsChanged(rmsdB: Float) {
                 _state.value = _state.value.copy(level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f))
             }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onError(error: Int) {
-                val recoverable = error == SpeechRecognizer.ERROR_NO_MATCH ||
-                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
-                    error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
-                    error == SpeechRecognizer.ERROR_CLIENT
-                if (keepGoing && recoverable) {
-                    commitPartial(); listen()
-                } else if (keepGoing) {
+                if (!keepGoing) return
+                // Stille ist kein Fehler: einfach weiter zuhören
+                val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                val fatal = error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                if (!silence) failures++
+                if (fatal || failures > MAX_FAILURES) {
                     keepGoing = false
                     commitPartial()
                     _state.value = _state.value.copy(listening = false, error = describe(error))
+                    return
                 }
+                // Verbindung zum Erkennungsdienst getrennt, Dienst beschäftigt o. Ä.:
+                // kurz warten und mit frischer Verbindung weitermachen, der Text bleibt erhalten.
+                commitPartial()
+                restart(if (silence) 150L else 350L * failures)
             }
             override fun onResults(results: Bundle?) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
@@ -83,11 +94,12 @@ class SpeechController(private val context: Context) {
                     finalText = listOf(s.finalText, text.ifBlank { s.partial }).filter { it.isNotBlank() }.joinToString(" "),
                     partial = "",
                 )
-                if (keepGoing) listen()
+                failures = 0
+                if (keepGoing) restart(150L)
             }
             override fun onPartialResults(partialResults: Bundle?) {
                 val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (!text.isNullOrBlank()) _state.value = _state.value.copy(partial = text)
+                if (!text.isNullOrBlank()) { failures = 0; _state.value = _state.value.copy(partial = text) }
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -99,7 +111,12 @@ class SpeechController(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000L)
         }
-        r.startListening(intent)
+        runCatching { r.startListening(intent) }.onFailure { restart(500L) }
+    }
+
+    private fun restart(delayMs: Long) {
+        handler.removeCallbacksAndMessages(null)
+        handler.postDelayed({ if (keepGoing) listen() }, delayMs)
     }
 
     private fun commitPartial() {
@@ -108,11 +125,18 @@ class SpeechController(private val context: Context) {
     }
 
     private fun describe(error: Int) = when (error) {
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mikrofon-Berechtigung fehlt"
-        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Keine Internetverbindung für die Spracherkennung"
-        SpeechRecognizer.ERROR_AUDIO -> "Mikrofon-Fehler"
-        else -> "Spracherkennung fehlgeschlagen (Code $error)"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Der Mikrofonzugriff fehlt."
+        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+            "Keine Internetverbindung für die Spracherkennung. Dein bisheriger Text bleibt erhalten."
+        SpeechRecognizer.ERROR_AUDIO -> "Das Mikrofon wird gerade von einer anderen App verwendet."
+        else -> "Die Spracherkennung ist gerade nicht erreichbar. Dein bisheriger Text bleibt erhalten – tippe auf „Fertig“ oder versuch es gleich noch einmal."
     }
 
-    fun destroy() { keepGoing = false; recognizer?.destroy(); recognizer = null }
+    fun destroy() {
+        keepGoing = false
+        handler.removeCallbacksAndMessages(null)
+        recognizer?.destroy(); recognizer = null
+    }
+
+    private companion object { const val MAX_FAILURES = 5 }
 }

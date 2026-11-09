@@ -21,6 +21,11 @@ Sag einfach, was ansteht – die App macht daraus saubere Aufgaben und trägt si
 - **Design**: ruhig und aufgeräumt – neutrale Farben, eine Akzentfarbe, gruppierte Listen, heller und dunkler Modus.
 - **Erledigt** ist einklappbar und lässt sich mit einem Tipp aufräumen; Überfälliges ist rot markiert.
 
+## Ansichten & Widget
+- **Liste** und **Kalender** oben umschaltbar: Monatsblatt mit Punkten für Tage mit Aufgaben/Terminen,
+  Tag antippen zeigt dessen Aufgaben und Termine, „Neue Aufgabe“ legt direkt für diesen Tag an.
+- **Widget** für den Startbildschirm: heutige und überfällige Aufgaben abhaken, Plus und Mikrofon.
+
 ## Einstellungen
 - **Darstellung**: Hell/Dunkel/System, sieben Akzentfarben oder Farben vom Hintergrundbild, kompakte Liste,
   Fortschritt und Termine ein-/ausblenden – mit Live-Vorschau.

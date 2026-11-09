@@ -34,6 +34,7 @@ import de.sprachliste.data.CalendarEvent
 import de.sprachliste.data.Task
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -60,7 +61,9 @@ fun MainScreen(
     prefs: Prefs,
     snackbar: SnackbarHostState,
     onMic: () -> Unit,
-    onPlus: () -> Unit,
+    monthEvents: List<CalendarEvent>,
+    onLoadMonth: (LocalDate) -> Unit,
+    onPlus: (LocalDate?) -> Unit,
     onSettings: () -> Unit,
     onToggle: (Task) -> Unit,
     onEdit: (Task) -> Unit,
@@ -74,12 +77,27 @@ fun MainScreen(
     val todayDone = todayAll.count { it.done }
     var showDone by rememberSaveable { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
+    // Kalender-Ansicht
+    var showCalendar by rememberSaveable { mutableStateOf(false) }
+    var selectedEpochDay by rememberSaveable { mutableLongStateOf(today.toEpochDay()) }
+    var monthOffset by rememberSaveable { mutableIntStateOf(0) }
+    val selectedDay = LocalDate.ofEpochDay(selectedEpochDay)
+    val month = YearMonth.from(today).plusMonths(monthOffset.toLong())
+    val monthGridStart = gridStart(month)
+    LaunchedEffect(showCalendar, monthGridStart) { if (showCalendar) onLoadMonth(monthGridStart) }
+    val taskDays = remember(tasks) { tasks.filter { !it.done }.mapNotNull { it.date }.toSet() }
+    val eventDays = remember(monthEvents) { monthEvents.map { it.date }.toSet() }
+    fun selectDay(d: LocalDate) {
+        selectedEpochDay = d.toEpochDay()
+        monthOffset = ((d.year - today.year) * 12 + (d.monthValue - today.monthValue))
+    }
+
     val toggle: (Task) -> Unit = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onToggle(it) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
-        bottomBar = { InputBar(onPlus = onPlus, onMic = onMic) },
+        bottomBar = { InputBar(onPlus = { onPlus(if (showCalendar) selectedDay else null) }, onMic = onMic) },
     ) { pad ->
         LazyColumn(
             Modifier.fillMaxSize().padding(pad),
@@ -87,27 +105,65 @@ fun MainScreen(
         ) {
             item(key = "header") { Header(today, todayDone, if (prefs.showProgress) todayAll.size else 0, onSettings) }
 
-            if (prefs.showEvents && events.isNotEmpty()) item(key = "events") { EventStrip(events, today, onOpenEvent) }
+            item(key = "tabs") { ViewSwitch(showCalendar) { showCalendar = it } }
 
-            if (sections.isEmpty()) item(key = "empty") { EmptyState(hasEvents = prefs.showEvents && events.isNotEmpty()) }
-
-            sections.forEach { sec ->
-                val isDone = sec.kind == Kind.DONE
-                item(key = "h_${sec.kind}") {
-                    SectionHeader(
-                        sec, expanded = !isDone || showDone,
-                        onToggleExpand = if (isDone) ({ showDone = !showDone }) else null,
-                        onClear = if (isDone && showDone) onClearDone else null,
+            if (showCalendar) {
+                item(key = "month") {
+                    MonthGrid(
+                        month = month, selected = selectedDay, today = today, taskDays = taskDays, eventDays = eventDays,
+                        onSelect = { selectDay(it) },
+                        onPrev = { monthOffset-- }, onNext = { monthOffset++ }, onToday = { selectDay(today) },
                     )
                 }
-                if (!isDone || showDone) {
-                    itemsIndexed(sec.tasks, key = { _, t -> t.id }) { i, t ->
-                        val shape = rowShape(i, sec.tasks.size)
-                        TaskRow(
-                            task = t, today = today, compact = prefs.compact, shape = shape, showDivider = i < sec.tasks.lastIndex,
-                            onToggle = toggle, onEdit = onEdit, onDelete = onDelete,
-                            modifier = Modifier.animateItem(),
+                val dayEvents = monthEvents.filter { it.date == selectedDay }
+                val dayTasks = tasks.filter { it.date == selectedDay }
+                    .sortedWith(compareBy<Task>({ it.done }, { it.time ?: LocalTime.MAX }, { it.createdAt }))
+                item(key = "dayTitle") {
+                    Text(
+                        (formatWhen(selectedDay, null, today)?.takeIf { it == "Heute" || it == "Morgen" || it == "Gestern" }?.let { "$it · " } ?: "") +
+                            selectedDay.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN)),
+                        style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, top = 20.dp, bottom = 8.dp),
+                    )
+                }
+                if (dayEvents.isEmpty() && dayTasks.isEmpty()) item(key = "dayEmpty") {
+                    Text("Nichts geplant. Über „Neue Aufgabe“ legst du etwas für diesen Tag an.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp))
+                }
+                itemsIndexed(dayEvents, key = { i, e -> "e_${i}_${e.id}" }) { i, e ->
+                    DayEventRow(e, rowShape(i, dayEvents.size), i < dayEvents.lastIndex) { onOpenEvent(e) }
+                }
+                if (dayEvents.isNotEmpty() && dayTasks.isNotEmpty()) item(key = "dayGap") { Spacer(Modifier.height(10.dp)) }
+                itemsIndexed(dayTasks, key = { _, t -> t.id }) { i, t ->
+                    TaskRow(
+                        task = t, today = today, compact = prefs.compact, shape = rowShape(i, dayTasks.size),
+                        showDivider = i < dayTasks.lastIndex, onToggle = toggle, onEdit = onEdit, onDelete = onDelete,
+                        modifier = Modifier.animateItem(),
+                    )
+                }
+            } else {
+                if (prefs.showEvents && events.isNotEmpty()) item(key = "events") { EventStrip(events, today, onOpenEvent) }
+
+                if (sections.isEmpty()) item(key = "empty") { EmptyState(hasEvents = prefs.showEvents && events.isNotEmpty()) }
+
+                sections.forEach { sec ->
+                    val isDone = sec.kind == Kind.DONE
+                    item(key = "h_${sec.kind}") {
+                        SectionHeader(
+                            sec, expanded = !isDone || showDone,
+                            onToggleExpand = if (isDone) ({ showDone = !showDone }) else null,
+                            onClear = if (isDone && showDone) onClearDone else null,
                         )
+                    }
+                    if (!isDone || showDone) {
+                        itemsIndexed(sec.tasks, key = { _, t -> t.id }) { i, t ->
+                            val shape = rowShape(i, sec.tasks.size)
+                            TaskRow(
+                                task = t, today = today, compact = prefs.compact, shape = shape, showDivider = i < sec.tasks.lastIndex,
+                                onToggle = toggle, onEdit = onEdit, onDelete = onDelete,
+                                modifier = Modifier.animateItem(),
+                            )
+                        }
                     }
                 }
             }
@@ -115,7 +171,7 @@ fun MainScreen(
     }
 }
 
-private fun rowShape(index: Int, count: Int): Shape {
+internal fun rowShape(index: Int, count: Int): Shape {
     val r = 14.dp
     return when {
         count == 1 -> RoundedCornerShape(r)
@@ -193,7 +249,7 @@ private fun SectionHeader(sec: Section, expanded: Boolean, onToggleExpand: (() -
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TaskRow(
+internal fun TaskRow(
     task: Task, today: LocalDate, compact: Boolean, shape: Shape, showDivider: Boolean,
     onToggle: (Task) -> Unit, onEdit: (Task) -> Unit, onDelete: (Task) -> Unit, modifier: Modifier,
 ) {
@@ -256,6 +312,30 @@ private fun TaskRow(
             }
             if (showDivider) HorizontalDivider(Modifier.padding(start = 52.dp), thickness = 1.dp,
                 color = MaterialTheme.colorScheme.outlineVariant)
+        }
+    }
+}
+
+/** Umschalter zwischen Liste und Kalender. */
+@Composable
+private fun ViewSwitch(calendar: Boolean, onChange: (Boolean) -> Unit) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Row(Modifier.padding(3.dp)) {
+            listOf(false to "Liste", true to "Kalender").forEach { (value, label) ->
+                val active = calendar == value
+                Surface(
+                    onClick = { onChange(value) }, shape = RoundedCornerShape(9.dp),
+                    color = if (active) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent,
+                    shadowElevation = if (active) 1.dp else 0.dp,
+                    modifier = Modifier.weight(1f).height(34.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(label, style = MaterialTheme.typography.titleSmall,
+                            color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         }
     }
 }

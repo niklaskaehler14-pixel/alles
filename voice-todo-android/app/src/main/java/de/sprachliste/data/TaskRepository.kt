@@ -1,14 +1,16 @@
 package de.sprachliste.data
 
 import android.content.Context
+import de.sprachliste.widget.TaskWidgetProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 
 /** Speichert Aufgaben lokal als JSON (kein Server, keine Cloud). */
-class TaskRepository(context: Context) {
-    private val prefs = context.getSharedPreferences("tasks", Context.MODE_PRIVATE)
+class TaskRepository private constructor(context: Context) {
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences("tasks", Context.MODE_PRIVATE)
     private val _tasks = MutableStateFlow(load())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
 
@@ -21,6 +23,14 @@ class TaskRepository(context: Context) {
         _tasks.value = list
         val arr = JSONArray().apply { list.forEach { put(it.toJson()) } }
         prefs.edit().putString("list", arr.toString()).apply()
+        TaskWidgetProvider.refresh(appContext) // Widget auf dem Startbildschirm aktuell halten
+    }
+
+    companion object {
+        @Volatile private var instance: TaskRepository? = null
+        /** Eine gemeinsame Instanz für App und Widget, damit beide denselben Stand sehen. */
+        fun get(context: Context): TaskRepository =
+            instance ?: synchronized(this) { instance ?: TaskRepository(context).also { instance = it } }
     }
 
     fun add(tasks: List<Task>) = save(_tasks.value + tasks)
@@ -49,7 +59,8 @@ data class Prefs(
 )
 
 class Settings(context: Context) {
-    private val sp = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val sp = appContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val _prefs = MutableStateFlow(load())
     val prefs: StateFlow<Prefs> = _prefs.asStateFlow()
     val current: Prefs get() = _prefs.value
@@ -70,6 +81,7 @@ class Settings(context: Context) {
 
     fun update(change: Prefs.() -> Prefs) {
         val p = _prefs.value.change().let { it.copy(apiKey = it.apiKey.trim()) }
+        val accentChanged = p.accent != _prefs.value.accent
         _prefs.value = p
         sp.edit()
             .putString("apiKey", p.apiKey).putBoolean("calendar", p.addToCalendar).putLong("calendarId", p.calendarId)
@@ -77,6 +89,7 @@ class Settings(context: Context) {
             .putInt("themeMode", p.themeMode).putInt("accent", p.accent).putBoolean("dynamicColor", p.dynamicColor)
             .putBoolean("compact", p.compact).putBoolean("showProgress", p.showProgress).putBoolean("showEvents", p.showEvents)
             .apply()
+        if (accentChanged) TaskWidgetProvider.refresh(appContext)
     }
 
     /** Kalendertermine, die schon einmal als Aufgabe übernommen wurden (kein zweites Mal importieren). */

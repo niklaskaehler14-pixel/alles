@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
     }
     private val calendarPermissionTick = mutableIntStateOf(0)
     private val resumeTick = mutableIntStateOf(0)
+    private val openAdd = mutableIntStateOf(0)
 
     override fun onResume() {
         super.onResume()
@@ -60,6 +61,7 @@ class MainActivity : ComponentActivity() {
                 val speech by vm.speech.state.collectAsStateWithLifecycle()
                 val message by vm.message.collectAsStateWithLifecycle()
                 val events by vm.events.collectAsStateWithLifecycle()
+                val monthEvents by vm.monthEvents.collectAsStateWithLifecycle()
                 val snackbar = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
                 var sheet by remember { mutableStateOf<EditTarget?>(null) }
@@ -67,6 +69,11 @@ class MainActivity : ComponentActivity() {
                 var confirmClear by remember { mutableStateOf(false) }
                 var eventChoice by remember { mutableStateOf<CalendarEvent?>(null) }
 
+                // Vom Widget aus „Neue Aufgabe“ getippt
+                val addRequest = openAdd.intValue
+                LaunchedEffect(addRequest) {
+                    if (addRequest > 0) { showSettings = false; sheet = EditTarget(null) }
+                }
                 LaunchedEffect(message) {
                     message?.let { snackbar.showSnackbar(it); vm.consumeMessage() }
                 }
@@ -98,7 +105,8 @@ class MainActivity : ComponentActivity() {
                 } else {
                     MainScreen(
                         tasks = tasks, events = events, prefs = prefs, snackbar = snackbar,
-                        onMic = ::startVoice, onPlus = { sheet = EditTarget(null) }, onSettings = { showSettings = true },
+                        monthEvents = monthEvents, onLoadMonth = vm::loadMonth,
+                        onMic = ::startVoice, onPlus = { day -> sheet = EditTarget(null, day) }, onSettings = { showSettings = true },
                         onToggle = vm::toggle, onEdit = { sheet = EditTarget(it) }, onDelete = deleteWithUndo,
                         onClearDone = { confirmClear = true },
                         onOpenEvent = { eventChoice = it },
@@ -111,6 +119,7 @@ class MainActivity : ComponentActivity() {
                 sheet?.let { st ->
                     TaskSheet(
                         editing = st.editing,
+                        initialDate = st.date,
                         onDismiss = { sheet = null },
                         onSave = { text, draft, autoDetect ->
                             sheet = null
@@ -148,7 +157,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Welche Aufgabe gerade im Eingabe-Fenster ist (null = neue Aufgabe). */
-    private data class EditTarget(val editing: Task?)
+    private data class EditTarget(val editing: Task?, val date: java.time.LocalDate? = null)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -165,6 +174,7 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         when {
             intent.action == ACTION_VOICE -> startVoice()
+            intent.action == ACTION_ADD -> openAdd.intValue++
             (intent.action == Intent.ACTION_SEND || intent.action == ACTION_CREATE_NOTE) && intent.type == "text/plain" ->
                 intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let(vm::analyze)
             intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "sprachliste" -> {
@@ -183,6 +193,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_VOICE = "de.sprachliste.action.VOICE"
+        const val ACTION_ADD = "de.sprachliste.action.ADD"
         /** „Hey Google, notiere …“ – der Assistant bietet Apps mit diesem Filter als Notiz-App an. */
         const val ACTION_CREATE_NOTE = "com.google.android.gms.actions.CREATE_NOTE"
     }

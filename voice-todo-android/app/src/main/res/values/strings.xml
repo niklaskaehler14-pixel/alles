@@ -3,4 +3,9 @@
     <string name="share_label">Zu Sprachliste hinzufügen</string>
     <string name="shortcut_voice_short">Sprechen</string>
     <string name="shortcut_voice_long">Aufgabe sprechen</string>
+    <string name="widget_today">Heute</string>
+    <string name="widget_empty">Für heute ist nichts offen.</string>
+    <string name="widget_add">Neue Aufgabe</string>
+    <string name="widget_done">Als erledigt markieren</string>
+    <string name="widget_desc">Zeigt die heutigen Aufgaben – abhaken, hinzufügen und einsprechen direkt vom Startbildschirm.</string>
 </resources>

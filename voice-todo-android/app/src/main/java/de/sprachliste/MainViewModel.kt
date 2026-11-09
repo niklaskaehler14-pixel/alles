@@ -31,7 +31,7 @@ sealed interface VoiceFlow {
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings = Settings(app)
-    private val repo = TaskRepository(app)
+    private val repo = TaskRepository.get(app)
     val calendar = CalendarSync(app)
     val prefs = settings.prefs
     private val extractor = TaskExtractor { settings.current.apiKey }
@@ -45,6 +45,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Termine aus Google Kalender, die nicht von der App stammen. */
     private val _events = MutableStateFlow<List<CalendarEvent>>(emptyList())
     val events = _events.asStateFlow()
+
+    /** Termine für die Monatsansicht (ohne die von der App selbst angelegten). */
+    private val _monthEvents = MutableStateFlow<List<CalendarEvent>>(emptyList())
+    val monthEvents = _monthEvents.asStateFlow()
+    private var monthStart: LocalDate? = null
+
+    /** Lädt die Termine für das sichtbare Monatsblatt (6 Wochen ab [gridStart]). */
+    fun loadMonth(gridStart: LocalDate) {
+        monthStart = gridStart
+        viewModelScope.launch {
+            val own = repo.tasks.value.mapNotNull { it.calendarEventId }.toSet()
+            _monthEvents.value = withContext(Dispatchers.IO) { calendar.upcoming(gridStart, 42).filter { it.id !in own } }
+        }
+    }
 
     fun consumeMessage() { _message.value = null }
     fun analyzeDenied() { _message.value = "Für die Aufnahme wird der Mikrofonzugriff benötigt" }
@@ -229,6 +243,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 calendar.upcoming(LocalDate.now(), 7).filter { it.id !in own }
             }
         }
+        monthStart?.let(::loadMonth)
     }
 
     fun calendars(): List<CalendarInfo> = calendar.calendars()

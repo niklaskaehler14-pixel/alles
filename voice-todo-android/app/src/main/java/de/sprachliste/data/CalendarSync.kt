@@ -19,7 +19,10 @@ import java.time.ZoneOffset
 data class CalendarInfo(val id: Long, val name: String, val account: String, val isGoogle: Boolean, val color: Int)
 
 /** Termin aus dem Kalender (für die Anzeige in der App). */
-data class CalendarEvent(val id: Long, val title: String, val date: LocalDate, val time: LocalTime?, val color: Int)
+data class CalendarEvent(
+    val id: Long, val title: String, val date: LocalDate, val time: LocalTime?, val color: Int,
+    val calendarId: Long = -1L, val recurring: Boolean = false, val durationMin: Int = 30,
+)
 
 /** Was sich im Kalender an einem verknüpften Termin geändert hat. */
 sealed interface EventState {
@@ -81,13 +84,13 @@ class CalendarSync(private val context: Context) {
         }
     }
 
-    fun insert(task: Task, preferredCalendar: Long): Long? {
+    fun insert(task: Task, preferredCalendar: Long, reminderMin: Int): Long? {
         if (task.date == null || !hasPermission()) return null
         return runCatching {
             val calId = resolveCalendarId(preferredCalendar) ?: return null
-            val v = values(task).apply { put(Events.CALENDAR_ID, calId); put(Events.HAS_ALARM, if (task.time != null) 1 else 0) }
+            val v = values(task).apply { put(Events.CALENDAR_ID, calId); put(Events.HAS_ALARM, if (task.time != null && reminderMin > 0) 1 else 0) }
             val id = context.contentResolver.insert(Events.CONTENT_URI, v)?.lastPathSegment?.toLongOrNull() ?: return null
-            if (task.time != null) addReminder(id)
+            if (task.time != null && reminderMin > 0) addReminder(id, reminderMin)
             id
         }.getOrNull()
     }
@@ -106,10 +109,10 @@ class CalendarSync(private val context: Context) {
         runCatching { context.contentResolver.delete(ContentUris.withAppendedId(Events.CONTENT_URI, eventId), null, null) }
     }
 
-    private fun addReminder(eventId: Long) {
+    private fun addReminder(eventId: Long, minutes: Int) {
         context.contentResolver.insert(CalendarContract.Reminders.CONTENT_URI, ContentValues().apply {
             put(CalendarContract.Reminders.EVENT_ID, eventId)
-            put(CalendarContract.Reminders.MINUTES, 15)
+            put(CalendarContract.Reminders.MINUTES, minutes)
             put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
         })
     }
@@ -142,14 +145,18 @@ class CalendarSync(private val context: Context) {
             ContentUris.appendId(it, begin); ContentUris.appendId(it, end)
         }.build()
         val proj = arrayOf(CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.TITLE,
-            CalendarContract.Instances.BEGIN, CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.DISPLAY_COLOR)
+            CalendarContract.Instances.BEGIN, CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.DISPLAY_COLOR,
+            CalendarContract.Instances.CALENDAR_ID, CalendarContract.Instances.RRULE, CalendarContract.Instances.END)
         val out = mutableListOf<CalendarEvent>()
         runCatching {
             context.contentResolver.query(uri, proj, "${CalendarContract.Instances.VISIBLE} = 1", null,
                 "${CalendarContract.Instances.BEGIN} ASC")?.use { c ->
                 while (c.moveToNext()) {
                     val (d, t) = toDateTime(c.getLong(2), c.getInt(3) == 1)
-                    if (d >= from) out += CalendarEvent(c.getLong(0), c.getString(1) ?: "(Ohne Titel)", d, t, c.getInt(4))
+                    val allDay = c.getInt(3) == 1
+                    val mins = if (allDay) 30 else ((c.getLong(7) - c.getLong(2)) / 60_000L).toInt().coerceIn(5, 24 * 60)
+                    if (d >= from) out += CalendarEvent(c.getLong(0), c.getString(1) ?: "(Ohne Titel)", d, t, c.getInt(4),
+                        calendarId = c.getLong(5), recurring = !c.getString(6).isNullOrBlank(), durationMin = mins)
                 }
             }
         }

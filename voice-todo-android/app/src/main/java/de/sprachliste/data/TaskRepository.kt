@@ -29,17 +29,62 @@ class TaskRepository(context: Context) {
     fun replaceAll(list: List<Task>) = save(list)
 }
 
-/** Einfache Einstellungen. */
-class Settings(context: Context) {
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    var apiKey: String
-        get() = prefs.getString("apiKey", "") ?: ""
-        set(v) = prefs.edit().putString("apiKey", v.trim()).apply()
+/** Alle Einstellungen der App als ein unveränderlicher Wert (für die Oberfläche beobachtbar). */
+data class Prefs(
+    val apiKey: String = "",
+    val addToCalendar: Boolean = true,
     /** -1 = automatisch (Google-Hauptkalender). */
-    var calendarId: Long
-        get() = prefs.getLong("calendarId", -1L)
-        set(v) = prefs.edit().putLong("calendarId", v).apply()
-    var addToCalendar: Boolean
-        get() = prefs.getBoolean("calendar", true)
-        set(v) = prefs.edit().putBoolean("calendar", v).apply()
+    val calendarId: Long = -1L,
+    /** Minuten vor dem Termin; 0 = keine Erinnerung. */
+    val reminderMin: Int = 15,
+    /** Neue Kalendertermine (z. B. per Google Assistant angelegt) als Aufgaben übernehmen. */
+    val autoImport: Boolean = true,
+    /** 0 = wie System, 1 = hell, 2 = dunkel. */
+    val themeMode: Int = 0,
+    val accent: Int = 0,
+    val dynamicColor: Boolean = false,
+    val compact: Boolean = false,
+    val showProgress: Boolean = true,
+    val showEvents: Boolean = true,
+)
+
+class Settings(context: Context) {
+    private val sp = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val _prefs = MutableStateFlow(load())
+    val prefs: StateFlow<Prefs> = _prefs.asStateFlow()
+    val current: Prefs get() = _prefs.value
+
+    private fun load() = Prefs(
+        apiKey = sp.getString("apiKey", "") ?: "",
+        addToCalendar = sp.getBoolean("calendar", true),
+        calendarId = sp.getLong("calendarId", -1L),
+        reminderMin = sp.getInt("reminderMin", 15),
+        autoImport = sp.getBoolean("autoImport", true),
+        themeMode = sp.getInt("themeMode", 0),
+        accent = sp.getInt("accent", 0),
+        dynamicColor = sp.getBoolean("dynamicColor", false),
+        compact = sp.getBoolean("compact", false),
+        showProgress = sp.getBoolean("showProgress", true),
+        showEvents = sp.getBoolean("showEvents", true),
+    )
+
+    fun update(change: Prefs.() -> Prefs) {
+        val p = _prefs.value.change().let { it.copy(apiKey = it.apiKey.trim()) }
+        _prefs.value = p
+        sp.edit()
+            .putString("apiKey", p.apiKey).putBoolean("calendar", p.addToCalendar).putLong("calendarId", p.calendarId)
+            .putInt("reminderMin", p.reminderMin).putBoolean("autoImport", p.autoImport)
+            .putInt("themeMode", p.themeMode).putInt("accent", p.accent).putBoolean("dynamicColor", p.dynamicColor)
+            .putBoolean("compact", p.compact).putBoolean("showProgress", p.showProgress).putBoolean("showEvents", p.showEvents)
+            .apply()
+    }
+
+    /** Kalendertermine, die schon einmal als Aufgabe übernommen wurden (kein zweites Mal importieren). */
+    var importedEventIds: Set<Long>
+        get() = sp.getStringSet("importedEvents", emptySet()).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
+        set(v) = sp.edit().putStringSet("importedEvents", v.map { it.toString() }.toSet()).apply()
+
+    var importBaselineDone: Boolean
+        get() = sp.getBoolean("importBaseline", false)
+        set(v) = sp.edit().putBoolean("importBaseline", v).apply()
 }

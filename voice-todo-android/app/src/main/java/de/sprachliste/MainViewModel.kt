@@ -33,7 +33,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings = Settings(app)
     private val repo = TaskRepository(app)
     val calendar = CalendarSync(app)
-    private val extractor = TaskExtractor { settings.apiKey }
+    val prefs = settings.prefs
+    private val extractor = TaskExtractor { settings.current.apiKey }
     val speech = SpeechController(app)
 
     val tasks = repo.tasks
@@ -48,7 +49,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun consumeMessage() { _message.value = null }
     fun analyzeDenied() { _message.value = "Für die Aufnahme wird der Mikrofonzugriff benötigt" }
 
-    private val calendarOn get() = settings.addToCalendar && calendar.hasPermission()
+    private val calendarOn get() = settings.current.addToCalendar && calendar.hasPermission()
 
     // ---------- Sprache ----------
     fun startListening() {
@@ -83,7 +84,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Satz (oder lange Texte, wenn die KI aktiv ist) gehen über die Vorschau.
      */
     fun submitTyped(text: String, draft: TaskDraft, autoDetect: Boolean) {
-        val many = autoDetect && (LocalParser.parse(text).size > 1 || (settings.apiKey.isNotBlank() && text.length > 80))
+        val many = autoDetect && (LocalParser.parse(text).size > 1 || (settings.current.apiKey.isNotBlank() && text.length > 80))
         if (many) analyze(text) else addTasks(listOf(draft.toTask()))
     }
 
@@ -91,7 +92,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (list.isEmpty()) return
         viewModelScope.launch {
             val withCal = withContext(Dispatchers.IO) {
-                list.map { t -> if (calendarOn && t.date != null) t.copy(calendarEventId = calendar.insert(t, settings.calendarId)) else t }
+                list.map { t -> if (calendarOn && t.date != null) t.copy(calendarEventId = calendar.insert(t, settings.current.calendarId, settings.current.reminderMin)) else t }
             }
             repo.add(withCal)
             val inCal = withCal.count { it.calendarEventId != null }
@@ -115,7 +116,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     !calendarOn -> task
                     task.date == null -> { task.calendarEventId?.let(calendar::delete); task.copy(calendarEventId = null) }
                     task.calendarEventId != null && calendar.update(task) -> task
-                    else -> task.copy(calendarEventId = calendar.insert(task, settings.calendarId))
+                    else -> task.copy(calendarEventId = calendar.insert(task, settings.current.calendarId, settings.current.reminderMin))
                 }
             }
             if (synced != task) repo.update(synced)
@@ -167,8 +168,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val before = current.associateBy { it.id }
                 repo.replaceAll(repo.tasks.value.map { t -> if (before[t.id] == t) byId[t.id] ?: t else t })
             }
+            importNewEvents()
             refreshEvents()
         }
+    }
+
+    /**
+     * Übernimmt neue Termine aus dem gewählten Kalender als Aufgaben – so landet auch das,
+     * was per Google Assistant / Gemini in den Kalender gesprochen wurde, in der Liste.
+     * Serientermine und bereits übernommene Termine werden ausgelassen.
+     */
+    private suspend fun importNewEvents() {
+        val p = settings.current
+        if (!p.addToCalendar || !p.autoImport) return
+        val known = settings.importedEventIds
+        val own = repo.tasks.value.mapNotNull { it.calendarEventId }.toSet()
+        val fresh = withContext(Dispatchers.IO) {
+            val target = calendar.resolveCalendarId(p.calendarId) ?: return@withContext emptyList()
+            calendar.upcoming(LocalDate.now(), 14)
+                .filter { it.calendarId == target && !it.recurring && it.id !in own && it.id !in known }
+                .distinctBy { it.id }
+        }
+        // Beim allerersten Abgleich nur merken, nicht den ganzen Kalender importieren
+        if (!settings.importBaselineDone) {
+            settings.importedEventIds = known + fresh.map { it.id }
+            settings.importBaselineDone = true
+            return
+        }
+        if (fresh.isEmpty()) return
+        settings.importedEventIds = known + fresh.map { it.id }
+        repo.add(fresh.map { it.toTask() })
+        _message.value = if (fresh.size == 1) "„${fresh[0].title}“ aus dem Kalender übernommen"
+        else "${fresh.size} Termine aus dem Kalender übernommen"
+    }
+
+    private fun CalendarEvent.toTask() = Task(title = title, date = date, time = time, durationMin = durationMin, calendarEventId = id)
+
+    /** Einen Kalendertermin von Hand als Aufgabe übernehmen. */
+    fun adopt(event: CalendarEvent) {
+        if (repo.tasks.value.any { it.calendarEventId == event.id }) return
+        settings.importedEventIds = settings.importedEventIds + event.id
+        repo.add(listOf(event.toTask()))
+        _message.value = "„${event.title}“ als Aufgabe übernommen"
+        refreshEvents()
+    }
+
+    fun updatePrefs(change: de.sprachliste.data.Prefs.() -> de.sprachliste.data.Prefs) {
+        val before = settings.current
+        settings.update(change)
+        val now = settings.current
+        // Anderer Kalender oder Übernahme neu eingeschaltet: vorhandene Termine nicht nachträglich importieren
+        if (now.calendarId != before.calendarId || (now.autoImport && !before.autoImport)) settings.importBaselineDone = false
+        if (now.addToCalendar != before.addToCalendar || now.calendarId != before.calendarId || now.autoImport != before.autoImport) syncFromCalendar()
     }
 
     fun refreshEvents() {

@@ -27,7 +27,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import de.sprachliste.data.Prefs
 import de.sprachliste.data.CalendarEvent
 import de.sprachliste.data.Task
 import java.time.LocalDate
@@ -55,6 +57,7 @@ private fun group(tasks: List<Task>, today: LocalDate): List<Section> {
 fun MainScreen(
     tasks: List<Task>,
     events: List<CalendarEvent>,
+    prefs: Prefs,
     snackbar: SnackbarHostState,
     onMic: () -> Unit,
     onPlus: () -> Unit,
@@ -82,11 +85,11 @@ fun MainScreen(
             Modifier.fillMaxSize().padding(pad),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
         ) {
-            item(key = "header") { Header(today, todayDone, todayAll.size, onSettings) }
+            item(key = "header") { Header(today, todayDone, if (prefs.showProgress) todayAll.size else 0, onSettings) }
 
-            if (events.isNotEmpty()) item(key = "events") { EventStrip(events, today, onOpenEvent) }
+            if (prefs.showEvents && events.isNotEmpty()) item(key = "events") { EventStrip(events, today, onOpenEvent) }
 
-            if (sections.isEmpty()) item(key = "empty") { EmptyState(hasEvents = events.isNotEmpty()) }
+            if (sections.isEmpty()) item(key = "empty") { EmptyState(hasEvents = prefs.showEvents && events.isNotEmpty()) }
 
             sections.forEach { sec ->
                 val isDone = sec.kind == Kind.DONE
@@ -101,7 +104,7 @@ fun MainScreen(
                     itemsIndexed(sec.tasks, key = { _, t -> t.id }) { i, t ->
                         val shape = rowShape(i, sec.tasks.size)
                         TaskRow(
-                            task = t, today = today, shape = shape, showDivider = i < sec.tasks.lastIndex,
+                            task = t, today = today, compact = prefs.compact, shape = shape, showDivider = i < sec.tasks.lastIndex,
                             onToggle = toggle, onEdit = onEdit, onDelete = onDelete,
                             modifier = Modifier.animateItem(),
                         )
@@ -191,7 +194,7 @@ private fun SectionHeader(sec: Section, expanded: Boolean, onToggleExpand: (() -
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskRow(
-    task: Task, today: LocalDate, shape: Shape, showDivider: Boolean,
+    task: Task, today: LocalDate, compact: Boolean, shape: Shape, showDivider: Boolean,
     onToggle: (Task) -> Unit, onEdit: (Task) -> Unit, onDelete: (Task) -> Unit, modifier: Modifier,
 ) {
     val state = rememberSwipeToDismissBoxState(confirmValueChange = {
@@ -218,11 +221,11 @@ private fun TaskRow(
     ) {
         Column(Modifier.background(MaterialTheme.colorScheme.surfaceContainer)) {
             Row(
-                Modifier.fillMaxWidth().clickable { onEdit(task) }.heightIn(min = 56.dp)
-                    .padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
+                Modifier.fillMaxWidth().clickable { onEdit(task) }.heightIn(min = if (compact) 44.dp else 56.dp)
+                    .padding(start = 4.dp, end = 16.dp, top = if (compact) 0.dp else 6.dp, bottom = if (compact) 0.dp else 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CheckCircle(task.done) { onToggle(task) }
+                CheckCircle(task.done, if (compact) 44.dp else 48.dp) { onToggle(task) }
                 Column(Modifier.weight(1f)) {
                     Text(
                         task.title, style = MaterialTheme.typography.bodyLarge,
@@ -245,7 +248,7 @@ private fun TaskRow(
                             }
                         }
                     }
-                    if (task.notes.isNotBlank()) {
+                    if (task.notes.isNotBlank() && !compact) {
                         Text(task.notes, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -259,10 +262,10 @@ private fun TaskRow(
 
 /** Runder Haken mit großer Tippfläche (48 dp). */
 @Composable
-private fun CheckCircle(checked: Boolean, onClick: () -> Unit) {
+private fun CheckCircle(checked: Boolean, size: Dp, onClick: () -> Unit) {
     val fill by animateColorAsState(if (checked) MaterialTheme.colorScheme.primary else Color.Transparent, label = "fill")
     val ring by animateColorAsState(if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, label = "ring")
-    Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Box(
             Modifier.size(22.dp).clip(CircleShape).background(fill).border(1.5.dp, ring, CircleShape),
             contentAlignment = Alignment.Center,

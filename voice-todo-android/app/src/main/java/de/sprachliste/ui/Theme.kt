@@ -1,6 +1,12 @@
 package de.sprachliste.ui
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.LocalContext
+import de.sprachliste.data.Prefs
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -69,11 +75,37 @@ private val AppTypography = Typography(
     labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
 )
 
+/** Wählbare Akzentfarben: Name, Farbe im hellen und im dunklen Design. */
+data class Accent(val name: String, val light: Color, val dark: Color)
+
+val Accents = listOf(
+    Accent("Blau", Color(0xFF1F5FE0), Color(0xFF8FB0FF)),
+    Accent("Grün", Color(0xFF1B7A57), Color(0xFF7ED3AE)),
+    Accent("Türkis", Color(0xFF0F7C8C), Color(0xFF79D2E0)),
+    Accent("Orange", Color(0xFFC25A10), Color(0xFFFFB787)),
+    Accent("Rot", Color(0xFFC0304A), Color(0xFFFFB0BD)),
+    Accent("Violett", Color(0xFF6A4BD6), Color(0xFFC4B6FF)),
+    Accent("Graphit", Color(0xFF2B2D31), Color(0xFFD3D5D9)),
+)
+
 @Composable
-fun SprachlisteTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) Dark else Light,
-        typography = AppTypography,
-        content = content,
-    )
+fun SprachlisteTheme(prefs: Prefs, content: @Composable () -> Unit) {
+    val dark = when (prefs.themeMode) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
+    val ctx = LocalContext.current
+    val scheme = if (prefs.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+    } else {
+        val base = if (dark) Dark else Light
+        val accent = Accents.getOrElse(prefs.accent) { Accents[0] }
+        val primary = if (dark) accent.dark else accent.light
+        val container = primary.copy(alpha = if (dark) 0.22f else 0.13f).compositeOver(base.background)
+        val onContainer = if (dark) primary else primary.copy(alpha = 0.9f).compositeOver(Color.Black)
+        base.copy(
+            primary = primary, onPrimary = if (dark) Color(0xFF101114) else Color.White,
+            primaryContainer = container, onPrimaryContainer = onContainer,
+            secondaryContainer = container, onSecondaryContainer = onContainer,
+            tertiary = primary, inversePrimary = if (dark) accent.light else accent.dark,
+        )
+    }
+    MaterialTheme(colorScheme = scheme, typography = AppTypography, content = content)
 }

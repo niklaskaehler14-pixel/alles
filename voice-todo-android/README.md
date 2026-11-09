@@ -21,17 +21,20 @@ Sag einfach, was ansteht – die App macht daraus saubere Aufgaben und trägt si
 - **Design**: ruhig und aufgeräumt – neutrale Farben, eine Akzentfarbe, gruppierte Listen, heller und dunkler Modus.
 - **Erledigt** ist einklappbar und lässt sich mit einem Tipp aufräumen; Überfälliges ist rot markiert.
 
-## Sprachassistenten
-| Assistent | So geht's |
-|---|---|
-| Google Assistant / Gemini | „Hey Google, öffne Sprachliste“ · App-Icon lange drücken → **Sprechen** (startet sofort das Zuhören) |
-| Bixby | „Hi Bixby, öffne Sprachliste“ – oder in *Bixby-Routinen* die App/den Shortcut „Sprechen“ starten |
-| Alle / Tasker / Routinen | Link `sprachliste://add?text=duschen%20gehen` öffnet die App und wertet den Text aus |
-| Andere Apps | Text **teilen → Sprachliste** |
+## Einstellungen
+- **Darstellung**: Hell/Dunkel/System, sieben Akzentfarben oder Farben vom Hintergrundbild, kompakte Liste,
+  Fortschritt und Termine ein-/ausblenden – mit Live-Vorschau.
+- **Kalender & Konten**: Kalender nach Google-Konto gruppiert, Konto hinzufügen, Erinnerungszeit,
+  automatische Übernahme neuer Termine.
 
-Ehrlich gesagt: Dass man *ohne* App-Öffnen direkt „Hey Google, schreib in Sprachliste …“ sagt, erlaubt Google
-nur für Apps aus dem Play Store (App Actions, schon vorbereitet in `res/xml/shortcuts.xml`). Alexa kann
-Android-Apps nicht direkt steuern.
+## Sprachassistenten (Google Assistant / Gemini)
+- **Aufgabe per Assistent**: „Hey Google, trag in meinen Kalender ein: morgen um 10 Uhr Zahnarzt.“
+  Der Termin landet im Google Kalender, Sprachliste übernimmt ihn beim nächsten Öffnen als Aufgabe
+  (Einstellungen → Sprachassistent zeigt, ob alles eingerichtet ist).
+- **App öffnen**: „Hey Google, öffne Sprachliste“ · App-Symbol gedrückt halten → **Sprechen**.
+- **Weitere Wege**: Text teilen → Sprachliste · Link `sprachliste://add?text=…` (Routinen, Tasker).
+- Direktes Diktieren in die App per „Hey Google“ erlaubt Google nur Play-Store-Apps (vorbereitet in
+  `res/xml/shortcuts.xml`).
 
 ## KI einschalten
 1. Auf <https://console.anthropic.com> einen API-Schlüssel erstellen.

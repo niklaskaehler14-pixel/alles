@@ -18,6 +18,8 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.saveable.rememberSaveable
+import de.sprachliste.data.CalendarEvent
 import de.sprachliste.data.Task
 import de.sprachliste.ui.*
 import kotlinx.coroutines.launch
@@ -33,9 +35,11 @@ class MainActivity : ComponentActivity() {
         vm.syncFromCalendar()
     }
     private val calendarPermissionTick = mutableIntStateOf(0)
+    private val resumeTick = mutableIntStateOf(0)
 
     override fun onResume() {
         super.onResume()
+        resumeTick.intValue++ // z. B. nach „Konto hinzufügen“ Kalenderliste neu laden
         vm.syncFromCalendar() // Änderungen aus Google Kalender übernehmen
     }
 
@@ -45,11 +49,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (vm.settings.addToCalendar && !vm.calendar.hasPermission()) requestCalendar()
+        if (vm.settings.current.addToCalendar && !vm.calendar.hasPermission()) requestCalendar()
         if (savedInstanceState == null) handleIntent(intent)
 
         setContent {
-            SprachlisteTheme {
+            val prefs by vm.prefs.collectAsStateWithLifecycle()
+            SprachlisteTheme(prefs) {
                 val tasks by vm.tasks.collectAsStateWithLifecycle()
                 val flow by vm.flow.collectAsStateWithLifecycle()
                 val speech by vm.speech.state.collectAsStateWithLifecycle()
@@ -58,8 +63,9 @@ class MainActivity : ComponentActivity() {
                 val snackbar = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
                 var sheet by remember { mutableStateOf<EditTarget?>(null) }
-                var showSettings by remember { mutableStateOf(false) }
+                var showSettings by rememberSaveable { mutableStateOf(false) }
                 var confirmClear by remember { mutableStateOf(false) }
+                var eventChoice by remember { mutableStateOf<CalendarEvent?>(null) }
 
                 LaunchedEffect(message) {
                     message?.let { snackbar.showSnackbar(it); vm.consumeMessage() }
@@ -72,13 +78,32 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                MainScreen(
-                    tasks = tasks, events = events, snackbar = snackbar,
-                    onMic = ::startVoice, onPlus = { sheet = EditTarget(null) }, onSettings = { showSettings = true },
-                    onToggle = vm::toggle, onEdit = { sheet = EditTarget(it) }, onDelete = deleteWithUndo,
-                    onClearDone = { confirmClear = true },
-                    onOpenEvent = { e -> runCatching { startActivity(vm.calendar.openIntent(e.id)) } },
-                )
+                if (showSettings) {
+                    val tick = calendarPermissionTick.intValue
+                    val resumed = resumeTick.intValue
+                    SettingsScreen(
+                        prefs = prefs,
+                        calendars = remember(tick, resumed) { vm.calendars() },
+                        hasCalendarPermission = remember(tick, resumed) { vm.calendar.hasPermission() },
+                        onUpdate = vm::updatePrefs,
+                        onRequestPermission = ::requestCalendar,
+                        onAddAccount = {
+                            runCatching {
+                                startActivity(Intent(android.provider.Settings.ACTION_ADD_ACCOUNT)
+                                    .putExtra(android.provider.Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google")))
+                            }
+                        },
+                        onClose = { showSettings = false },
+                    )
+                } else {
+                    MainScreen(
+                        tasks = tasks, events = events, prefs = prefs, snackbar = snackbar,
+                        onMic = ::startVoice, onPlus = { sheet = EditTarget(null) }, onSettings = { showSettings = true },
+                        onToggle = vm::toggle, onEdit = { sheet = EditTarget(it) }, onDelete = deleteWithUndo,
+                        onClearDone = { confirmClear = true },
+                        onOpenEvent = { eventChoice = it },
+                    )
+                }
                 if (flow != VoiceFlow.Idle) {
                     VoiceSheet(flow, speech, onDone = vm::finishListening, onCancel = vm::cancelVoice,
                         onAccept = vm::accept, onRetry = { vm.cancelVoice(); startVoice() })
@@ -96,6 +121,19 @@ class MainActivity : ComponentActivity() {
                         onDelete = { t -> sheet = null; deleteWithUndo(t) },
                     )
                 }
+                eventChoice?.let { e ->
+                    AlertDialog(
+                        onDismissRequest = { eventChoice = null },
+                        title = { Text(e.title) },
+                        text = { Text(formatWhen(e.date, e.time) ?: "") },
+                        confirmButton = { TextButton({ eventChoice = null; vm.adopt(e) }) { Text("Als Aufgabe übernehmen") } },
+                        dismissButton = {
+                            TextButton({ eventChoice = null; runCatching { startActivity(vm.calendar.openIntent(e.id)) } }) {
+                                Text("Im Kalender öffnen")
+                            }
+                        },
+                    )
+                }
                 if (confirmClear) {
                     AlertDialog(
                         onDismissRequest = { confirmClear = false },
@@ -103,22 +141,6 @@ class MainActivity : ComponentActivity() {
                         text = { Text("Alle erledigten Aufgaben werden entfernt – auch aus dem Kalender.") },
                         confirmButton = { TextButton({ confirmClear = false; vm.clearDone() }) { Text("Löschen") } },
                         dismissButton = { TextButton({ confirmClear = false }) { Text("Abbrechen") } },
-                    )
-                }
-                if (showSettings) {
-                    val tick = calendarPermissionTick.intValue
-                    val calendars = remember(tick) { vm.calendars() }
-                    SettingsDialog(
-                        apiKey = vm.settings.apiKey, calendarOn = vm.settings.addToCalendar,
-                        calendarId = vm.settings.calendarId, calendars = calendars,
-                        hasCalendarPermission = remember(tick) { vm.calendar.hasPermission() },
-                        onRequestPermission = ::requestCalendar,
-                        onDismiss = { showSettings = false },
-                        onSave = { key, cal, calId ->
-                            vm.settings.apiKey = key; vm.settings.addToCalendar = cal; vm.settings.calendarId = calId
-                            showSettings = false
-                            if (cal && !vm.calendar.hasPermission()) requestCalendar() else vm.syncFromCalendar()
-                        },
                     )
                 }
             }
@@ -143,7 +165,7 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         when {
             intent.action == ACTION_VOICE -> startVoice()
-            intent.action == Intent.ACTION_SEND && intent.type == "text/plain" ->
+            (intent.action == Intent.ACTION_SEND || intent.action == ACTION_CREATE_NOTE) && intent.type == "text/plain" ->
                 intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let(vm::analyze)
             intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "sprachliste" -> {
                 val text = intent.data?.getQueryParameter("text")
@@ -159,5 +181,9 @@ class MainActivity : ComponentActivity() {
 
     private fun granted(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
 
-    companion object { const val ACTION_VOICE = "de.sprachliste.action.VOICE" }
+    companion object {
+        const val ACTION_VOICE = "de.sprachliste.action.VOICE"
+        /** „Hey Google, notiere …“ – der Assistant bietet Apps mit diesem Filter als Notiz-App an. */
+        const val ACTION_CREATE_NOTE = "com.google.android.gms.actions.CREATE_NOTE"
+    }
 }

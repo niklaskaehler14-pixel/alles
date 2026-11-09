@@ -348,6 +348,8 @@ fun SettingsDialog(
                     "Ohne Schlüssel wird offline mit einfachen Regeln ausgewertet.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(key, { key = it }, label = { Text("API-Schlüssel (sk-ant-…)") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                Text("Version ${de.sprachliste.BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { TextButton({ onSave(key, cal, calId) }) { Text("Speichern") } },

@@ -12,15 +12,26 @@ android {
         applicationId = "de.sprachliste"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
+    // Fester Signaturschlüssel, damit sich Updates über die installierte App installieren lassen.
+    // Die Datei liegt NICHT im Repository: Der Build bei GitHub legt sie aus dem Secret
+    // SIGNING_KEYSTORE_B64 an. Fehlt sie (z. B. lokal), wird mit dem Debug-Schlüssel signiert.
+    val fixedKeystore = rootProject.file("release.keystore")
+    signingConfigs {
+        if (fixedKeystore.exists()) create("fixed") {
+            storeFile = fixedKeystore
+            storePassword = "android"
+            keyAlias = "sprachliste"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Für eine einfache Installation mit dem Debug-Schlüssel signiert.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (fixedKeystore.exists()) "fixed" else "debug")
         }
     }
     compileOptions {
@@ -28,7 +39,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     packaging {
         resources {
             excludes += setOf(

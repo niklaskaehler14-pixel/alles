@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signatur-Studio</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 16px 60px;background:#ebebe8;font-family:Arial,Helvetica,sans-serif;color:#151515}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{font-size:14px;color:#62625e;margin:0 0 22px}
+  .grid{display:grid;grid-template-columns:290px 1fr;gap:24px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .panel{background:#fff;border-radius:12px;padding:20px}
+  label{display:block;font-size:12px;font-weight:bold;color:#62625e;margin:12px 0 4px}
+  label:first-of-type{margin-top:0}
+  input{width:100%;padding:9px 11px;border:1px solid #d6d6d1;border-radius:7px;font-size:14px;font-family:inherit}
+  input:focus{outline:none;border-color:#151515}
+  .note{font-size:12px;color:#8d8d88;margin-top:4px}
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+  .tab{padding:8px 13px;border:1px solid #d6d6d1;border-radius:20px;background:#fff;font-size:13px;cursor:pointer;color:#151515}
+  .tab.on{background:#151515;color:#fff;border-color:#151515}
+  .stage{overflow-x:auto;padding:10px 4px;min-height:200px}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  button.b{padding:10px 16px;border:0;border-radius:7px;background:#151515;color:#fff;font-size:14px;cursor:pointer}
+  button.ghost{background:#fff;color:#151515;border:1px solid #d6d6d1}
+  .hint{font-size:13px;line-height:1.55;color:#62625e;margin-top:16px}
+
+  /* ===== Animationen (laufen in Apple Mail, iOS Mail, Thunderbird) ===== */
+  @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  @keyframes rise{from{transform:translateY(105%)}to{transform:none}}
+  @keyframes draw{from{width:0}to{width:100%}}
+  @keyframes typeL{from{width:0}to{width:100%}}
+  @keyframes blink{50%{opacity:0}}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(31,169,90,.5)}70%,100%{box-shadow:0 0 0 7px rgba(31,169,90,0)}}
+  @keyframes plane{from{left:0}to{left:calc(100% - 16px)}}
+  @keyframes tear{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:none}}
+  @keyframes slashIn{from{opacity:0;transform:translateX(50px) skewX(-25deg)}to{opacity:1;transform:skewX(-25deg)}}
+  .fade{animation:in .6s both}
+  .mask{display:block;overflow:hidden}
+  .mask>span{display:block;animation:rise .7s cubic-bezier(.2,.7,.1,1) both}
+  .rule{height:1px;background:currentColor;animation:draw 1s cubic-bezier(.7,0,.2,1) both}
+  .tl{display:block;overflow:hidden;white-space:nowrap;width:0;animation:typeL .7s steps(28) forwards}
+  .cur{display:inline-block;width:8px;height:14px;background:#3dff8a;vertical-align:-2px;animation:blink 1s step-end infinite}
+  .bar{height:8px;background:#3dff8a;width:0;animation:typeL 1.2s .3s steps(20) forwards}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#1fa95a;animation:pulse 2s 1s infinite}
+  .ul{text-decoration:none;background:linear-gradient(currentColor,currentColor) 0 100%/0 1px no-repeat;animation:ulIn .8s both}
+  @keyframes ulIn{to{background-size:100% 1px}}
+  .plane{position:absolute;top:-9px;line-height:16px;font-size:15px;animation:plane 2.2s .7s cubic-bezier(.6,0,.3,1) both}
+  .tk-a{animation:tear .6s both}.tk-b{animation:tear .6s .25s both}
+  .slash{position:absolute;top:-10px;bottom:-10px;transform:skewX(-25deg);animation:slashIn .8s cubic-bezier(.2,.8,.2,1) both}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Signatur-Studio</h1>
+  <p class="sub">Links deine Daten, oben das Design wählen. Leere Felder verschwinden automatisch. Alles wird im Browser gespeichert.</p>
+
+  <div class="grid">
+    <form class="panel" id="form" autocomplete="off" onsubmit="return false">
+      <label for="name">Name</label><input id="name">
+      <label for="title">Titel / Rolle</label><input id="title">
+      <label for="location">Ort</label><input id="location" placeholder="z. B. Hamburg">
+      <label for="email">E-Mail</label><input id="email" type="email">
+      <label for="phone">Telefon</label><input id="phone" type="tel" placeholder="+49 151 23456789">
+      <label for="instagram">Instagram</label><input id="instagram" placeholder="deinname">
+      <div class="note">Nur der Benutzername, ohne @</div>
+      <label for="tiktok">TikTok</label><input id="tiktok" placeholder="deinname">
+      <label for="linkedin">LinkedIn</label><input id="linkedin" placeholder="linkedin.com/in/deinname">
+      <label for="website">Website</label><input id="website" placeholder="deine-seite.de">
+      <label for="initials">Initialen</label><input id="initials" maxlength="3">
+      <label for="status">Status-Text</label><input id="status" placeholder="Verfügbar für Projekte">
+      <div class="note">Wird bei „Status“ und „Terminal“ angezeigt</div>
+    </form>
+
+    <div>
+      <div class="tabs" id="tabs"></div>
+      <div class="stage"><div id="signatur"></div></div>
+      <div class="btns">
+        <button type="button" class="b" id="copy">Signatur kopieren</button>
+        <button type="button" class="b ghost" id="replay">Animation nochmal</button>
+      </div>
+      <p class="hint"><b>Gmail:</b> „Signatur kopieren“ → Einstellungen → Alle Einstellungen → Signatur → einfügen.<br>
+      Animationen laufen in Apple Mail, iPhone und Thunderbird. Gmail und Outlook zeigen die Signatur ohne Bewegung.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- Daten ---------- */
+const DEFAULTS={name:"Niklas Kähler",title:"Developer & Creator",location:"",email:"niklaskaehler14@gmail.com",
+  phone:"",instagram:"",tiktok:"",linkedin:"",website:"",initials:"NK",status:"Verfügbar für Projekte",design:"boot"};
+const KEY="sig-studio-v1";
+let data={...DEFAULTS};
+try{Object.assign(data,JSON.parse(localStorage.getItem(KEY)||"{}"))}catch(e){}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}};
+
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const url=u=>/^https?:\/\//i.test(u)?u:"https://"+u;
+const bare=u=>u.replace(/^https?:\/\//i,"").replace(/^www\./,"").replace(/\/$/,"");
+
+/* Alle Kontaktwege als Liste – jedes Design nutzt sie */
+function contacts(d){
+  const c=[];
+  if(d.email)c.push({k:"mail",label:"E-Mail",text:d.email,href:"mailto:"+d.email});
+  if(d.phone)c.push({k:"phone",label:"Telefon",text:d.phone,href:"tel:"+d.phone.replace(/[^\d+]/g,"")});
+  if(d.website)c.push({k:"web",label:"Web",text:bare(d.website),href:url(d.website)});
+  if(d.instagram){const u=d.instagram.replace(/^@/,"");c.push({k:"insta",label:"Instagram",text:"@"+u,href:"https://instagram.com/"+u})}
+  if(d.tiktok){const u=d.tiktok.replace(/^@/,"");c.push({k:"tiktok",label:"TikTok",text:"@"+u,href:"https://tiktok.com/@"+u})}
+  if(d.linkedin)c.push({k:"linkedin",label:"LinkedIn",text:bare(d.linkedin),href:url(d.linkedin)});
+  return c;
+}
+const a=(c,style)=>`<a href="${esc(c.href)}" style="${style}">${esc(c.text)}</a>`;
+
+/* ---------- Designs ---------- */
+const DESIGNS={
+
+/* Terminal Boot */
+boot:{name:"Terminal Boot",render(d,c){
+  let t=1.6,line=(html,extra="")=>{const s=`<span class="tl" style="animation-delay:${t.toFixed(1)}s;${extra}">${html}</span>`;t+=.55;return s};
+  const pad=s=>(s+"      ").slice(0,6).replace(/ /g,"&nbsp;");
+  return `<table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;background:#070908;border-radius:10px;font-family:'Courier New',Consolas,monospace;font-size:13px;color:#3dff8a">
+  <tr><td style="padding:11px 16px;border-bottom:1px solid #1b211d"><span style="color:#ff5f57">●</span> <span style="color:#febc2e">●</span> <span style="color:#28c840">●</span><span style="color:#5a6a60;font-size:12px">&nbsp; ~/${esc((d.name.split(" ")[0]||"me").toLowerCase())} — zsh</span></td></tr>
+  <tr><td style="padding:14px 18px 18px;line-height:1.75">
+    <span class="tl" style="animation-delay:.1s;color:#7fa68c">$ ./load_profile.sh</span>
+    <div style="width:200px;border:1px solid #1d3a28;padding:2px;margin:4px 0 6px"><div class="bar"></div></div>
+    ${line(esc(d.name.toUpperCase()),"color:#fff;font-size:21px;font-weight:bold;line-height:1.45")}
+    ${d.title?line(`&nbsp;&nbsp;${pad("role")}: "${esc(d.title.toLowerCase())}"`,"color:#7fa68c"):""}
+    ${d.location?line(`&nbsp;&nbsp;${pad("based")}: ${esc(d.location)}`,"color:#7fa68c"):""}
+    ${c.map(x=>line(`&nbsp;&nbsp;${pad(x.k)}: ${a(x,"color:#3dff8a")}`)).join("")}
+    ${d.status?line(`✓ ${esc(d.status.toLowerCase())}`,"color:#febc2e"):line("✓ ready.","color:#febc2e")}
+    <span>$ <span class="cur"></span></span>
+  </td></tr></table>`}},
+
+/* Terminal classic */
+term:{name:"Terminal",render(d,c){
+  let t=.2,line=(h,x="")=>{const s=`<span class="tl" style="animation-delay:${t.toFixed(1)}s;${x}">&gt; ${h}</span>`;t+=.8;return s};
+  return `<table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;background:#0b0e0c;border-radius:10px;font-family:'Courier New',Consolas,monospace;font-size:14px;color:#3dff8a">
+  <tr><td style="padding:11px 16px;border-bottom:1px solid #1d2420"><span style="color:#ff5f57">●</span> <span style="color:#febc2e">●</span> <span style="color:#28c840">●</span><span style="color:#5a6a60;font-size:12px">&nbsp; signatur</span></td></tr>
+  <tr><td style="padding:16px 18px 20px;line-height:1.8">
+    ${line(`<b style="color:#fff">${esc(d.name)}</b>`)}
+    ${d.title?line(esc(d.title),"color:#8ab89a"):""}
+    ${c.map(x=>line(a(x,"color:#3dff8a"))).join("")}
+    <span>&gt; <span class="cur"></span></span>
+  </td></tr></table>`}},
+
+/* NEU: Swiss – reine Typo, Raster, ein Akzentpunkt */
+swiss:{name:"Swiss",render(d,c){
+  const rows=c.map((x,i)=>`<tr class="fade" style="animation-delay:${.7+i*.08}s"><td style="padding:3px 18px 3px 0;font-size:11px;color:#8d8d88;width:70px;vertical-align:top">${x.label}</td><td style="padding:3px 0;font-size:13px">${a(x,"color:#151515;text-decoration:none")}</td></tr>`).join("");
+  return `<table cellpadding="0" cellspacing="0" border="0" width="520" style="width:520px;font-family:Helvetica,Arial,sans-serif;color:#151515">
+  <tr><td colspan="2" style="padding-bottom:14px">
+    <span class="mask" style="font-size:28px;font-weight:bold;letter-spacing:-.8px;line-height:1.15"><span>${esc(d.name)}<span style="display:inline-block;width:8px;height:8px;background:#e5322d;margin-left:4px"></span></span></span>
+    ${d.title||d.location?`<span class="mask" style="font-size:14px;color:#62625e;margin-top:2px"><span style="animation-delay:.12s">${esc([d.title,d.location].filter(Boolean).join(" — "))}</span></span>`:""}
+  </td></tr>
+  <tr><td colspan="2" style="padding-bottom:12px"><div class="rule" style="color:#151515;animation-delay:.35s"></div></td></tr>
+  ${rows}
+  </table>`}},
+
+/* NEU: Editorial – Serif-Name, Initialen als Monogramm */
+editorial:{name:"Editorial",render(d,c){
+  return `<table cellpadding="0" cellspacing="0" border="0" width="540" style="width:540px;font-family:Georgia,'Times New Roman',serif;color:#1c1b19">
+  <tr>
+    <td style="width:64px;vertical-align:top;padding-right:20px">
+      <div class="fade" style="width:56px;height:56px;border:1px solid #1c1b19;text-align:center;line-height:56px;font-size:20px;font-style:italic">${esc(d.initials)}</div></td>
+    <td style="vertical-align:top;border-left:1px solid #d6d6d1;padding-left:20px">
+      <span class="mask" style="font-size:24px;line-height:1.2"><span>${esc(d.name)}</span></span>
+      ${d.title?`<span class="mask" style="font-family:Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#7a7873;margin-top:5px"><span style="animation-delay:.12s">${esc(d.title)}${d.location?" · "+esc(d.location):""}</span></span>`:""}
+      <div class="fade" style="font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.75;margin-top:12px;animation-delay:.45s">
+        ${c.map((x,i)=>`<a class="ul" href="${esc(x.href)}" style="color:#1c1b19;animation-delay:${.7+i*.12}s">${esc(x.text)}</a>`).join("<br>")}
+      </div></td>
+  </tr></table>`}},
+
+/* NEU: Status – ganz schlicht, ein lebendiger Punkt */
+status:{name:"Status",render(d,c){
+  return `<table cellpadding="0" cellspacing="0" border="0" width="520" style="width:520px;font-family:Helvetica,Arial,sans-serif;color:#151515">
+  <tr><td>
+    <div class="fade" style="font-size:16px;font-weight:bold">${esc(d.name)}</div>
+    ${d.title?`<div class="fade" style="font-size:13px;color:#62625e;margin-top:2px;animation-delay:.1s">${esc(d.title)}${d.location?", "+esc(d.location):""}</div>`:""}
+    ${d.status?`<div class="fade" style="display:inline-block;margin-top:10px;padding:4px 10px 4px 9px;border:1px solid #d6d6d1;border-radius:20px;font-size:12px;color:#3a3a37;animation-delay:.25s"><span class="dot"></span>&nbsp; ${esc(d.status)}</div>`:""}
+    <div class="fade" style="font-size:13px;margin-top:12px;color:#62625e;animation-delay:.4s">
+      ${c.map(x=>a(x,"color:#151515;text-decoration:none")).join('<span style="color:#c2c2bd">&nbsp;&nbsp;/&nbsp;&nbsp;</span>')}
+    </div>
+  </td></tr></table>`}},
+
+/* Boarding Pass – Flugzeug jetzt auf der Linie */
+pass:{name:"Boarding Pass",render(d,c){
+  const ig=c.find(x=>x.k==="insta");
+  const rest=c.filter(x=>x!==ig);
+  return `<table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;font-family:Arial,Helvetica,sans-serif;color:#151515;border-collapse:separate">
+  <tr>
+    <td class="tk-a" style="background:#fff;border-radius:12px 3px 3px 12px;padding:0;border-right:2px dashed #c9c9c4;vertical-align:top">
+      <div style="background:#151515;color:#fff;padding:9px 20px;border-radius:12px 3px 0 0;font-size:10px;letter-spacing:3px;font-weight:bold">BOARDING PASS</div>
+      <div style="padding:14px 20px 16px">
+        <div style="font-size:10px;color:#8d8d88;letter-spacing:2px">PASSENGER</div>
+        <div style="font-size:20px;font-weight:900;text-transform:uppercase">${esc(d.name)}</div>
+        ${d.title?`<div style="font-size:12px;color:#62625e">${esc(d.title)}</div>`:""}
+        <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:12px"><tr>
+          <td style="font-size:22px;font-weight:900;width:50px">YOU</td>
+          <td style="padding:0 12px;vertical-align:middle"><div style="position:relative;border-top:2px dotted #c9c9c4;height:0"><span class="plane">✈</span></div></td>
+          <td style="font-size:22px;font-weight:900;text-align:right;width:50px">${esc(d.initials)}</td></tr></table>
+        <div style="font-size:12px;margin-top:12px;line-height:1.7">${rest.map(x=>a(x,"color:#151515;text-decoration:none")).join(" · ")}</div>
+      </div></td>
+    <td class="tk-b" style="width:130px;background:#ffd23f;border-radius:3px 12px 12px 3px;padding:16px;vertical-align:top">
+      <div style="font-size:10px;letter-spacing:2px;font-weight:bold">SEAT</div>
+      <div style="font-size:26px;font-weight:900">1A</div>
+      ${ig?`<div style="font-size:10px;letter-spacing:2px;font-weight:bold;margin-top:6px">GATE</div><div style="font-size:12px;font-weight:900;word-break:break-all">${a(ig,"color:#151515;text-decoration:none")}</div>`:""}
+      <div style="margin-top:12px;height:32px;background:repeating-linear-gradient(90deg,#151515 0 2px,transparent 2px 4px,#151515 4px 7px,transparent 7px 9px)"></div></td>
+  </tr></table>`}},
+
+/* Slash */
+slash:{name:"Slash",render(d,c){
+  return `<table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;font-family:Arial,Helvetica,sans-serif;background:#fff;border:1px solid #d6d6d1;border-radius:12px;border-collapse:separate">
+  <tr><td style="padding:20px 10px 20px 22px;vertical-align:middle">
+    <div class="fade" style="font-size:19px;font-weight:bold">${esc(d.name)}</div>
+    ${d.title?`<div class="fade" style="font-size:13px;color:#62625e;animation-delay:.1s">${esc(d.title)}</div>`:""}
+    <div class="fade" style="font-size:12px;line-height:1.7;margin-top:12px;animation-delay:.3s">${c.map(x=>a(x,"color:#62625e;text-decoration:none")).join("<br>")}</div></td>
+  <td style="width:160px;padding:0"><div style="position:relative;width:160px;height:160px;overflow:hidden;border-radius:0 11px 11px 0">
+    <div class="slash" style="left:28px;width:32px;background:#151515;animation-delay:.2s"></div>
+    <div class="slash" style="left:68px;width:42px;background:#3a3a37;animation-delay:.35s"></div>
+    <div class="slash" style="left:118px;width:22px;background:#c9c9c4;animation-delay:.5s"></div>
+    <div class="fade" style="position:absolute;left:0;right:0;top:58px;text-align:center;font-size:38px;font-weight:900;font-style:italic;color:#fff;animation-delay:.6s">${esc(d.initials)}</div></div></td></tr>
+  </table>`}},
+};
+
+/* ---------- UI ---------- */
+const tabs=document.getElementById("tabs");
+for(const [id,ds] of Object.entries(DESIGNS)){
+  const b=document.createElement("button");b.type="button";b.className="tab";b.textContent=ds.name;b.dataset.id=id;
+  b.onclick=()=>{data.design=id;save();render()};tabs.appendChild(b);
+}
+function render(){
+  if(!DESIGNS[data.design])data.design="boot";
+  const d=Object.fromEntries(Object.keys(DEFAULTS).map(k=>[k,String(data[k]??"").trim()]));
+  document.getElementById("signatur").innerHTML=DESIGNS[d.design].render(d,contacts(d));
+  tabs.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.id===d.design));
+}
+for(const k in DEFAULTS){if(k==="design")continue;
+  const el=document.getElementById(k);el.value=data[k];
+  el.addEventListener("input",()=>{data[k]=el.value;save();render()});
+}
+render();
+document.getElementById("replay").onclick=render;
+document.getElementById("copy").onclick=function(){
+  const r=document.createRange();r.selectNode(document.getElementById("signatur"));
+  const s=getSelection();s.removeAllRanges();s.addRange(r);document.execCommand("copy");s.removeAllRanges();
+  this.textContent="✓ Kopiert!";setTimeout(()=>this.textContent="Signatur kopieren",1600);
+};
+</script>
+</body>
+</html>

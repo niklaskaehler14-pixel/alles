@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signatur-Designs 2</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 16px 60px;background:#e7e8ec;font-family:Arial,Helvetica,sans-serif;color:#14161c}
+  .wrap{max-width:680px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 6px}
+  .sub{font-size:14px;color:#5b6070;margin:0 0 28px;line-height:1.5}
+  .item{margin-bottom:44px}
+  .head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .head b{font-size:15px}.head span{font-size:13px;color:#5b6070}
+  .stage{overflow-x:auto;padding:8px}
+  .btns{display:flex;gap:8px}
+  button{padding:8px 14px;border:0;border-radius:8px;background:#14161c;color:#fff;font-size:13px;cursor:pointer}
+  button.ghost{background:#fff;color:#14161c;border:1px solid #d9dce3}
+  .mono{font-family:'Courier New',Consolas,monospace}
+  @keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .i1{animation:in .6s .1s both}.i2{animation:in .6s .3s both}.i3{animation:in .6s .5s both}.i4{animation:in .6s .7s both}
+
+  /* A – Glitch */
+  @keyframes gl1{0%,86%,100%{transform:none;clip-path:inset(0 0 0 0)}88%{transform:translate(-4px,1px);clip-path:inset(10% 0 55% 0)}90%{transform:translate(4px,-1px);clip-path:inset(60% 0 8% 0)}92%{transform:translate(-2px,0);clip-path:inset(30% 0 40% 0)}}
+  @keyframes gl2{0%,86%,100%{opacity:0}88%,92%{opacity:.85}}
+  @keyframes scan{to{background-position:0 6px}}
+  @keyframes bootIn{0%{opacity:0;filter:blur(6px);transform:scaleY(.02)}40%{opacity:1;transform:scaleY(.02)}100%{filter:none;transform:none}}
+  .gl-wrap{animation:bootIn .9s cubic-bezier(.2,.8,.2,1) both}
+  .gl{position:relative;display:inline-block;animation:gl1 3.2s 1s infinite}
+  .gl::before,.gl::after{content:attr(data-t);position:absolute;inset:0;animation:gl2 3.2s 1s infinite}
+  .gl::before{color:#ff2a6d;transform:translate(-3px,0);mix-blend-mode:screen}
+  .gl::after{color:#05d9e8;transform:translate(3px,0);mix-blend-mode:screen}
+  .scan{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.04) 0 1px,transparent 1px 3px);animation:scan .4s linear infinite;pointer-events:none}
+
+  /* B – Boarding Pass */
+  @keyframes tear{from{transform:translateX(-30px) rotate(-4deg);opacity:0}to{transform:none;opacity:1}}
+  @keyframes stub{0%{transform:translateX(40px) rotate(6deg);opacity:0}100%{transform:none;opacity:1}}
+  @keyframes plane{0%{left:0}100%{left:calc(100% - 18px)}}
+  .tk-main{animation:tear .7s cubic-bezier(.2,.8,.2,1) both}
+  .tk-stub{animation:stub .7s .35s cubic-bezier(.2,.8,.2,1) both}
+  .plane{position:absolute;top:-8px;animation:plane 2.4s .8s cubic-bezier(.6,0,.3,1) both}
+
+  /* C – Holo ID */
+  @keyframes holo{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+  @keyframes tilt{0%,100%{transform:perspective(900px) rotateY(-6deg) rotateX(3deg)}50%{transform:perspective(900px) rotateY(6deg) rotateX(-3deg)}}
+  @keyframes flipIn{from{transform:perspective(900px) rotateY(-90deg);opacity:0}to{transform:perspective(900px) rotateY(-6deg) rotateX(3deg);opacity:1}}
+  .holo-card{animation:flipIn .9s cubic-bezier(.2,.8,.2,1) both, tilt 6s .9s ease-in-out infinite}
+  .holo{position:absolute;inset:0;border-radius:18px;background:linear-gradient(115deg,transparent 20%,rgba(255,0,200,.25) 30%,rgba(0,255,230,.25) 40%,rgba(255,255,0,.2) 50%,transparent 60%);background-size:200% 100%;mix-blend-mode:overlay;animation:holo 3.5s linear infinite;pointer-events:none}
+
+  /* D – Split-Flap */
+  @keyframes flap{0%{transform:rotateX(90deg)}100%{transform:none}}
+  .fl{display:inline-block;width:22px;height:32px;line-height:32px;margin:0 1px;text-align:center;background:#1c1c1c;color:#ffd23f;font-weight:bold;font-size:19px;border-radius:3px;position:relative;
+      box-shadow:inset 0 -1px 0 #000, inset 0 15px 0 rgba(255,255,255,.04);transform-origin:50% 50%;animation:flap .25s both}
+  .fl::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#000}
+  .fl.sp{background:transparent;box-shadow:none}.fl.sp::after{display:none}
+
+  /* E – Caution / Brutal */
+  @keyframes marq{to{transform:translateX(-50%)}}
+  @keyframes stamp{0%{transform:scale(2.4) rotate(-12deg);opacity:0}70%{transform:scale(.95) rotate(-8deg);opacity:1}100%{transform:scale(1) rotate(-8deg)}}
+  .marq{display:inline-block;white-space:nowrap;animation:marq 9s linear infinite}
+  .stamp{display:inline-block;animation:stamp .5s 1s cubic-bezier(.2,.8,.2,1) both}
+
+  /* F – Terminal Boot */
+  @keyframes typeL{from{width:0}to{width:100%}}
+  @keyframes blink{50%{opacity:0}}
+  @keyframes bar{from{width:0}to{width:100%}}
+  .tl{display:block;overflow:hidden;white-space:nowrap;width:0;animation:typeL .7s steps(30) forwards}
+  .cur{display:inline-block;width:8px;height:14px;background:#3dff8a;vertical-align:-2px;animation:blink 1s step-end infinite}
+  .bar{height:8px;background:#3dff8a;width:0;animation:bar 1.2s .3s steps(20) forwards}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Runde 2: Designs, die auffallen</h1>
+  <p class="sub">Diesmal ohne „Standard-Karte“, alles in der Richtung von Terminal und Slash.
+  Sag mir die Nummer (oder ein Mix), dann kommt es in den Editor.</p>
+
+  <!-- A -->
+  <div class="item"><div class="head"><div><b>A · Glitch</b> <span>– Bildschirm schaltet an, Name glitcht</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <div class="gl-wrap" style="position:relative;width:560px;background:#0a0a12;border-radius:6px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#fff;border-left:4px solid #ff2a6d">
+      <div class="scan"></div>
+      <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+        <td style="padding:26px 28px">
+          <div class="mono" style="font-size:11px;color:#05d9e8;letter-spacing:3px">// SIGNAL_RECEIVED</div>
+          <div style="font-size:34px;font-weight:900;letter-spacing:-1px;margin-top:6px;text-transform:uppercase"><span class="gl" data-t="Niklas Kähler">Niklas Kähler</span></div>
+          <div class="i2 mono" style="font-size:12px;color:#ff2a6d;margin-top:4px">[ developer &amp; creator ]</div>
+          <div class="i3 mono" style="font-size:12px;margin-top:16px;line-height:1.9;color:#c9cbe0">
+            MAIL&nbsp;→ <a href="mailto:niklaskaehler14@gmail.com" style="color:#fff;text-decoration:none">niklaskaehler14@gmail.com</a><br>
+            TEL&nbsp;&nbsp;→ <a href="#" style="color:#fff;text-decoration:none">+49 151 23456789</a><br>
+            IG&nbsp;&nbsp;&nbsp;→ <a href="#" style="color:#fff;text-decoration:none">@deinname</a></div></td>
+        <td style="padding:26px 28px 26px 0;vertical-align:bottom;text-align:right">
+          <div class="mono" style="font-size:64px;font-weight:900;line-height:1;color:transparent;-webkit-text-stroke:1px #05d9e8">NK</div></td>
+      </tr></table>
+    </div>
+  </div></div></div>
+
+  <!-- B -->
+  <div class="item"><div class="head"><div><b>B · Boarding Pass</b> <span>– Ticket mit Abriss, Flugzeug fliegt los</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;font-family:Arial,Helvetica,sans-serif;color:#14161c;border-collapse:separate">
+      <tr>
+        <td class="tk-main" style="background:#fff;border-radius:14px 4px 4px 14px;padding:0;border-right:2px dashed #c4c7cf">
+          <div style="background:#14161c;color:#fff;padding:10px 20px;border-radius:14px 4px 0 0;font-size:11px;letter-spacing:3px;font-weight:bold">BOARDING PASS · FIRST CLASS</div>
+          <div style="padding:16px 20px 18px">
+            <div style="font-size:10px;color:#8a8f9c;letter-spacing:2px">PASSENGER</div>
+            <div class="i1" style="font-size:22px;font-weight:900;text-transform:uppercase">Niklas Kähler</div>
+            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:12px"><tr>
+              <td style="font-size:26px;font-weight:900">YOU</td>
+              <td style="width:60%;padding:0 10px"><div style="position:relative;border-top:2px dotted #c4c7cf;height:0"><span class="plane" style="font-size:16px">✈</span></div></td>
+              <td style="font-size:26px;font-weight:900;text-align:right">NK</td></tr></table>
+            <div class="i3" style="font-size:12px;margin-top:12px;line-height:1.7;color:#3a3f4c">
+              <a href="mailto:niklaskaehler14@gmail.com" style="color:#14161c;text-decoration:none">niklaskaehler14@gmail.com</a> · <a href="#" style="color:#14161c;text-decoration:none">+49 151 23456789</a></div>
+          </div></td>
+        <td class="tk-stub" style="width:140px;background:#ffd23f;border-radius:4px 14px 14px 4px;padding:16px;vertical-align:top">
+          <div style="font-size:10px;letter-spacing:2px;font-weight:bold">SEAT</div>
+          <div style="font-size:28px;font-weight:900">1A</div>
+          <div style="font-size:10px;letter-spacing:2px;font-weight:bold;margin-top:6px">GATE</div>
+          <div style="font-size:14px;font-weight:900">@INSTAGRAM</div>
+          <div style="margin-top:12px;height:34px;background:repeating-linear-gradient(90deg,#14161c 0 2px,transparent 2px 4px,#14161c 4px 7px,transparent 7px 9px)"></div></td>
+      </tr>
+    </table>
+  </div></div></div>
+
+  <!-- C -->
+  <div class="item"><div class="head"><div><b>C · Holo-ID</b> <span>– Karte dreht sich rein, Hologramm-Glanz</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage" style="padding:16px 8px"><div class="sig">
+    <div class="holo-card" style="position:relative;width:540px;border-radius:18px;background:linear-gradient(135deg,#1a1a2e,#2b2250 60%,#0f3443);color:#fff;font-family:Arial,Helvetica,sans-serif;box-shadow:0 20px 40px rgba(20,10,60,.35)">
+      <div class="holo"></div>
+      <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+        <td style="padding:22px 24px;vertical-align:top">
+          <div style="font-size:10px;letter-spacing:4px;color:#b9a7ff">MEMBER ID · 0014</div>
+          <div style="width:42px;height:32px;border-radius:6px;margin-top:14px;background:linear-gradient(135deg,#f6d365,#c79a2b);box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)"></div>
+          <div class="i2" style="font-size:24px;font-weight:900;margin-top:14px;letter-spacing:.5px">NIKLAS KÄHLER</div>
+          <div class="i2" style="font-size:12px;color:#cfc8ff;letter-spacing:2px">DEVELOPER &amp; CREATOR</div>
+          <div class="i3 mono" style="font-size:12px;margin-top:14px;line-height:1.7;color:#e6e3ff">
+            <a href="mailto:niklaskaehler14@gmail.com" style="color:#fff;text-decoration:none">niklaskaehler14@gmail.com</a><br>
+            <a href="#" style="color:#fff;text-decoration:none">+49 151 23456789</a> · <a href="#" style="color:#fff;text-decoration:none">@deinname</a></div></td>
+        <td style="padding:22px 24px;vertical-align:top;text-align:right;width:130px">
+          <div style="width:96px;height:96px;margin-left:auto;border-radius:50%;background:conic-gradient(#ff00c8,#00ffe6,#fff700,#ff00c8);padding:3px">
+            <div style="width:90px;height:90px;border-radius:50%;background:#1a1a2e;line-height:90px;text-align:center;font-size:32px;font-weight:900">NK</div></div>
+          <div class="mono" style="font-size:10px;color:#8f86c9;margin-top:16px">VALID ∞</div></td>
+      </tr></table>
+    </div>
+  </div></div></div>
+
+  <!-- D -->
+  <div class="item"><div class="head"><div><b>D · Abflug-Tafel</b> <span>– Buchstaben klappen wie am Flughafen</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;background:#0e0e0e;border-radius:10px;font-family:'Courier New',Consolas,monospace;color:#ffd23f">
+      <tr><td style="padding:14px 18px;border-bottom:1px solid #222;font-size:11px;letter-spacing:3px;color:#8a8a8a">DEPARTURES · ABFLUG</td></tr>
+      <tr><td style="padding:18px 18px 8px" class="flaps" data-text="NIKLAS KÄHLER"></td></tr>
+      <tr><td style="padding:4px 18px 18px" class="flaps" data-text="DEV & CREATOR" data-delay="1.1"></td></tr>
+      <tr><td class="i4" style="padding:12px 18px 16px;border-top:1px solid #222;font-size:12px;line-height:1.8;color:#e6e6e6">
+        <span style="color:#ffd23f">MAIL</span>&nbsp; <a href="mailto:niklaskaehler14@gmail.com" style="color:#e6e6e6;text-decoration:none">niklaskaehler14@gmail.com</a>&nbsp;&nbsp;
+        <span style="color:#ffd23f">TEL</span>&nbsp; <a href="#" style="color:#e6e6e6;text-decoration:none">+49 151 23456789</a>&nbsp;&nbsp;
+        <span style="color:#3dff8a">● ON TIME</span></td></tr>
+    </table>
+  </div></div></div>
+
+  <!-- E -->
+  <div class="item"><div class="head"><div><b>E · Brutal</b> <span>– Laufband, Stempel knallt drauf</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;background:#f2efe6;border:3px solid #14161c;font-family:Arial,Helvetica,sans-serif;color:#14161c;box-shadow:8px 8px 0 #14161c">
+      <tr><td style="padding:0;background:#ffd23f;border-bottom:3px solid #14161c;overflow:hidden;white-space:nowrap">
+        <div style="width:554px;overflow:hidden"><span class="marq" style="font-size:13px;font-weight:900;letter-spacing:2px;padding:7px 0">
+          ★ NIKLAS KÄHLER ★ DEVELOPER ★ CREATOR ★ NIKLAS KÄHLER ★ DEVELOPER ★ CREATOR ★&nbsp;★ NIKLAS KÄHLER ★ DEVELOPER ★ CREATOR ★ NIKLAS KÄHLER ★ DEVELOPER ★ CREATOR ★&nbsp;</span></div></td></tr>
+      <tr><td style="padding:20px 22px"><div style="position:relative">
+        <div class="i1" style="font-size:44px;font-weight:900;line-height:.95;letter-spacing:-2px;text-transform:uppercase">Niklas<br>Kähler.</div>
+        <div class="i3" style="font-size:13px;font-weight:bold;margin-top:14px;line-height:1.8">
+          <a href="mailto:niklaskaehler14@gmail.com" style="color:#14161c">niklaskaehler14@gmail.com</a><br>
+          <a href="#" style="color:#14161c">+49 151 23456789</a> &nbsp;/&nbsp; <a href="#" style="color:#14161c">@deinname</a></div>
+        <div class="stamp" style="position:absolute;right:4px;top:6px;border:3px solid #e63946;color:#e63946;padding:8px 12px;font-size:16px;font-weight:900;letter-spacing:2px;border-radius:4px">APPROVED</div>
+      </div></td></tr>
+    </table>
+  </div></div></div>
+
+  <!-- F -->
+  <div class="item"><div class="head"><div><b>F · Terminal Boot</b> <span>– Weiterentwicklung von deinem Favoriten</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;background:#070908;border-radius:12px;font-family:'Courier New',Consolas,monospace;font-size:13px;color:#3dff8a;box-shadow:0 0 0 1px #1d2a22,0 0 30px rgba(61,255,138,.12)">
+      <tr><td style="padding:12px 16px;border-bottom:1px solid #1d2420">
+        <span style="color:#ff5f57">●</span> <span style="color:#febc2e">●</span> <span style="color:#28c840">●</span>
+        <span style="color:#5a6a60;font-size:12px">&nbsp; ~/niklas — zsh</span></td></tr>
+      <tr><td style="padding:14px 18px 18px;line-height:1.75">
+        <span class="tl" style="animation-delay:.1s;color:#8ab89a">$ ./load_profile.sh</span>
+        <div style="width:200px;border:1px solid #1d3a28;padding:2px;margin:4px 0 6px"><div class="bar"></div></div>
+        <span class="tl" style="animation-delay:1.6s;color:#fff;font-size:22px;font-weight:bold;line-height:1.4">NIKLAS KÄHLER</span>
+        <span class="tl" style="animation-delay:2.3s;color:#8ab89a">  role&nbsp;&nbsp;: "developer &amp; creator"</span>
+        <span class="tl" style="animation-delay:2.9s">  mail&nbsp;&nbsp;: <a href="mailto:niklaskaehler14@gmail.com" style="color:#3dff8a">niklaskaehler14@gmail.com</a></span>
+        <span class="tl" style="animation-delay:3.5s">  phone : <a href="#" style="color:#3dff8a">+49 151 23456789</a></span>
+        <span class="tl" style="animation-delay:4.1s">  insta : <a href="#" style="color:#3dff8a">@deinname</a></span>
+        <span class="tl" style="animation-delay:4.7s;color:#febc2e">✓ ready.</span>
+        <span>$ <span class="cur"></span></span>
+      </td></tr>
+    </table>
+  </div></div></div>
+</div>
+
+<script>
+function buildFlaps(root){
+  root.querySelectorAll(".flaps").forEach(td=>{
+    const base=parseFloat(td.dataset.delay||"0.2");
+    td.innerHTML=[...td.dataset.text].map((c,i)=>
+      `<span class="fl${c===" "?" sp":""}" style="animation-delay:${(base+i*.06).toFixed(2)}s">${c===" "?"&nbsp;":c.replace("&","&amp;")}</span>`).join("");
+  });
+}
+buildFlaps(document);
+document.querySelectorAll("[data-replay]").forEach(b=>b.onclick=()=>{
+  const sig=b.closest(".item").querySelector(".sig");sig.innerHTML=sig.innerHTML;});
+document.querySelectorAll("[data-copy]").forEach(b=>b.onclick=()=>{
+  const r=document.createRange();r.selectNode(b.closest(".item").querySelector(".sig"));
+  const s=getSelection();s.removeAllRanges();s.addRange(r);document.execCommand("copy");s.removeAllRanges();
+  b.textContent="✓ Kopiert";setTimeout(()=>b.textContent="Kopieren",1600);});
+</script>
+</body>
+</html>

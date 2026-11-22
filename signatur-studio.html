@@ -50,6 +50,20 @@
   .plane{position:absolute;top:-9px;line-height:16px;font-size:15px;animation:plane 2.2s .7s cubic-bezier(.6,0,.3,1) both}
   .tk-a{animation:tear .6s both}.tk-b{animation:tear .6s .25s both}
   .slash{position:absolute;top:-10px;bottom:-10px;transform:skewX(-25deg);animation:slashIn .8s cubic-bezier(.2,.8,.2,1) both}
+  /* Slash (Original-Design) */
+  @keyframes shine{0%{left:-60%}60%,100%{left:130%}}
+  @keyframes badge{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
+  @keyframes iconPop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+  @keyframes letter{0%,100%{letter-spacing:5px}50%{letter-spacing:7px}}
+  .sig-card{position:relative;overflow:hidden}
+  .sig-card::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;
+    background:linear-gradient(100deg,transparent,rgba(255,255,255,.65),transparent);
+    transform:skewX(-25deg);animation:shine 4.5s 1.2s ease-in-out infinite;pointer-events:none}
+  .brand{animation:in .7s ease-out both,letter 6s 1s ease-in-out infinite}
+  .ic{display:block;animation:iconPop .5s cubic-bezier(.3,1.6,.5,1) both}
+  .ic:hover{background:#14161c !important;color:#fff !important}
+  .badge{display:inline-block;animation:badge 2.4s 1.5s ease-in-out infinite}
+  .lnk:hover{color:#6c5ce7 !important}
 </style>
 </head>
 <body>
@@ -61,6 +75,7 @@
     <form class="panel" id="form" autocomplete="off" onsubmit="return false">
       <label for="name">Name</label><input id="name">
       <label for="title">Titel / Rolle</label><input id="title">
+      <label for="brand">Schriftzug oben (Slash)</label><input id="brand">
       <label for="location">Ort</label><input id="location" placeholder="z. B. Hamburg">
       <label for="email">E-Mail</label><input id="email" type="email">
       <label for="phone">Telefon</label><input id="phone" type="tel" placeholder="+49 151 23456789">
@@ -90,8 +105,8 @@
 <script>
 /* ---------- Daten ---------- */
 const DEFAULTS={name:"Niklas Kähler",title:"Developer & Creator",location:"",email:"niklaskaehler14@gmail.com",
-  phone:"",instagram:"",tiktok:"",linkedin:"",website:"",initials:"NK",status:"Verfügbar für Projekte",design:"boot"};
-const KEY="sig-studio-v1";
+  phone:"",instagram:"",tiktok:"",linkedin:"",website:"",initials:"NK",brand:"NIKLAS",status:"Verfügbar für Projekte",design:"boot"};
+const KEY="sig-studio-v2";
 let data={...DEFAULTS};
 try{Object.assign(data,JSON.parse(localStorage.getItem(KEY)||"{}"))}catch(e){}
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}};
@@ -208,19 +223,30 @@ pass:{name:"Boarding Pass",render(d,c){
       <div style="margin-top:12px;height:32px;background:repeating-linear-gradient(90deg,#151515 0 2px,transparent 2px 4px,#151515 4px 7px,transparent 7px 9px)"></div></td>
   </tr></table>`}},
 
-/* Slash */
+/* Slash – Original-Design vom Anfang */
 slash:{name:"Slash",render(d,c){
-  return `<table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;font-family:Arial,Helvetica,sans-serif;background:#fff;border:1px solid #d6d6d1;border-radius:12px;border-collapse:separate">
-  <tr><td style="padding:20px 10px 20px 22px;vertical-align:middle">
-    <div class="fade" style="font-size:19px;font-weight:bold">${esc(d.name)}</div>
-    ${d.title?`<div class="fade" style="font-size:13px;color:#62625e;animation-delay:.1s">${esc(d.title)}</div>`:""}
-    <div class="fade" style="font-size:12px;line-height:1.7;margin-top:12px;animation-delay:.3s">${c.map(x=>a(x,"color:#62625e;text-decoration:none")).join("<br>")}</div></td>
-  <td style="width:160px;padding:0"><div style="position:relative;width:160px;height:160px;overflow:hidden;border-radius:0 11px 11px 0">
-    <div class="slash" style="left:28px;width:32px;background:#151515;animation-delay:.2s"></div>
-    <div class="slash" style="left:68px;width:42px;background:#3a3a37;animation-delay:.35s"></div>
-    <div class="slash" style="left:118px;width:22px;background:#c9c9c4;animation-delay:.5s"></div>
-    <div class="fade" style="position:absolute;left:0;right:0;top:58px;text-align:center;font-size:38px;font-weight:900;font-style:italic;color:#fff;animation-delay:.6s">${esc(d.initials)}</div></div></td></tr>
-  </table>`}},
+  const ICON={mail:["✉",14],phone:["☏",15],web:["◎",14],insta:["IG",11],tiktok:["TT",11],linkedin:["in",12]};
+  const icons=c.map((x,i)=>`<a class="ic" href="${esc(x.href)}" title="${x.label}" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:${ICON[x.k][1]}px;font-weight:bold;${i?"margin-top:6px;":""}animation-delay:${(.3+i*.1).toFixed(1)}s">${ICON[x.k][0]}</a>`).join("");
+  const lines=c.filter(x=>["mail","phone","web"].includes(x.k)).map(x=>a(x,"color:#5b6070;text-decoration:none").replace("<a ",'<a class="lnk" '));
+  return `<table class="sig-card" cellpadding="0" cellspacing="0" border="0" width="560"
+  style="width:560px;font-family:Arial,Helvetica,sans-serif;color:#14161c;background:#ffffff;border:1px solid #d9dce3;border-radius:14px;border-collapse:separate;box-shadow:0 10px 30px rgba(20,22,28,.08)">
+  <tr>${c.length?`<td style="padding:18px 0 18px 18px;vertical-align:middle;width:40px">
+      <table cellpadding="0" cellspacing="0" border="0" style="border:1px solid #d9dce3;border-radius:10px;padding:6px 4px"><tr><td align="center" style="padding:4px">${icons}</td></tr></table></td>`:""}
+    <td style="padding:20px 10px 20px 18px;vertical-align:middle">
+      ${d.brand?`<div class="brand" style="font-size:20px;font-weight:300;letter-spacing:5px;color:#14161c"><span style="font-weight:900;font-style:italic;letter-spacing:-2px;color:#6c5ce7">//</span> ${esc(d.brand.toUpperCase())}</div>`:""}
+      <div class="fade" style="font-size:19px;font-weight:bold;margin-top:${d.brand?12:0}px;animation-delay:.1s">${esc(d.name)}
+        <span class="badge" style="width:16px;height:16px;line-height:16px;border-radius:50%;background:#2f80ff;color:#fff;font-size:10px;text-align:center;vertical-align:2px">✓</span></div>
+      ${d.title?`<div class="fade" style="font-size:13px;color:#5b6070;margin-top:2px;animation-delay:.25s">${esc(d.title)}</div>`:""}
+      ${lines.length?`<div class="fade" style="font-size:12px;line-height:1.7;margin-top:12px;animation-delay:.55s">${lines.join("<br>")}</div>`:""}
+    </td>
+    <td style="width:170px;padding:0;vertical-align:middle">
+      <div style="position:relative;width:170px;height:170px;overflow:hidden;border-radius:0 13px 13px 0">
+        <div class="slash" style="left:30px;width:34px;background:#14161c;animation-delay:.2s"></div>
+        <div class="slash" style="left:72px;width:46px;background:linear-gradient(160deg,#6c5ce7,#00b4d8);animation-delay:.35s"></div>
+        <div class="slash" style="left:126px;width:24px;background:#c9ccd4;animation-delay:.5s"></div>
+        <div class="fade" style="position:absolute;left:0;right:0;top:62px;text-align:center;font-size:40px;font-weight:900;font-style:italic;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,.35);animation-delay:.4s">${esc(d.initials)}</div>
+      </div></td>
+  </tr></table>`}},
 };
 
 /* ---------- UI ---------- */

@@ -243,7 +243,7 @@ pass:{name:"Boarding Pass",render(d,c){
 slash:{name:"Slash",render(d,c){
   const ICON={mail:["✉",14],phone:["☏",15]};
   const inner=x=>x.logo?`<img src="${esc(x.logo)}" width="16" height="16" alt="${x.label}" style="display:inline-block;width:16px;height:16px;vertical-align:-3px;border:0">`:ICON[x.k][0];
-  const icons=c.map((x,i)=>`<a class="ic" href="${esc(x.href)}" title="${x.label}" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:${x.logo?14:ICON[x.k][1]}px;font-weight:bold;${i?"margin-top:6px;":""}animation-delay:${(.3+i*.1).toFixed(1)}s">${inner(x)}</a>`).join("");
+  const icons=c.map((x,i)=>`<a class="ic" href="${esc(x.href)}" title="${x.label}" style="display:block;width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:${x.logo?14:ICON[x.k][1]}px;font-weight:bold;${i?"margin-top:6px;":""}animation-delay:${(.3+i*.1).toFixed(1)}s">${inner(x)}</a>`).join("");
   const lines=c.filter(x=>["mail","phone","web"].includes(x.k)).map(x=>a(x,"color:#5b6070;text-decoration:none").replace("<a ",'<a class="lnk" '));
   return `<table class="sig-card" cellpadding="0" cellspacing="0" border="0" width="560"
   style="width:560px;font-family:Arial,Helvetica,sans-serif;color:#14161c;background:#ffffff;border:1px solid #d9dce3;border-radius:14px;border-collapse:separate;box-shadow:0 10px 30px rgba(20,22,28,.08)">
@@ -252,17 +252,18 @@ slash:{name:"Slash",render(d,c){
     <td style="padding:20px 10px 20px 18px;vertical-align:middle">
       ${d.brand?`<div class="brand" style="font-size:20px;font-weight:300;letter-spacing:5px;color:#14161c"><span style="font-weight:900;font-style:italic;letter-spacing:-2px;color:#6c5ce7">//</span> ${esc(d.brand.toUpperCase())}</div>`:""}
       <div class="fade" style="font-size:19px;font-weight:bold;margin-top:${d.brand?12:0}px;animation-delay:.1s">${esc(d.name)}
-        <span class="badge" style="width:16px;height:16px;line-height:16px;border-radius:50%;background:#2f80ff;color:#fff;font-size:10px;text-align:center;vertical-align:2px">✓</span></div>
+        <span class="badge" style="display:inline-block;width:16px;height:16px;line-height:16px;border-radius:50%;background:#2f80ff;color:#fff;font-size:10px;text-align:center;vertical-align:2px">✓</span></div>
       ${d.title?`<div class="fade" style="font-size:13px;color:#5b6070;margin-top:2px;animation-delay:.25s">${esc(d.title)}</div>`:""}
       ${lines.length?`<div class="fade" style="font-size:12px;line-height:1.7;margin-top:12px;animation-delay:.55s">${lines.join("<br>")}</div>`:""}
     </td>
-    <td style="width:170px;padding:0;vertical-align:middle">
+    ${d._static?`<td width="170" height="170" align="center" bgcolor="#14161c" style="width:170px;height:170px;padding:0;vertical-align:middle;text-align:center;background-color:#14161c;background-image:linear-gradient(115deg,#ffffff 0%,#ffffff 27.9%,#14161c 27.9%,#14161c 41.6%,#ffffff 41.6%,#ffffff 44.8%,#6c5ce7 44.8%,#00b4d8 63.2%,#ffffff 63.2%,#ffffff 66.4%,#c9ccd4 66.4%,#c9ccd4 76.1%,#ffffff 76.1%);border-radius:0 13px 13px 0">
+      <span style="font-family:Arial,Helvetica,sans-serif;font-size:40px;font-weight:900;font-style:italic;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,.35)">${esc(d.initials)}</span></td>`:`<td style="width:170px;padding:0;vertical-align:middle">
       <div style="position:relative;width:170px;height:170px;overflow:hidden;border-radius:0 13px 13px 0">
         <div class="slash" style="left:30px;width:34px;background:#14161c;animation-delay:.2s"></div>
         <div class="slash" style="left:72px;width:46px;background:linear-gradient(160deg,#6c5ce7,#00b4d8);animation-delay:.35s"></div>
         <div class="slash" style="left:126px;width:24px;background:#c9ccd4;animation-delay:.5s"></div>
         <div class="fade" style="position:absolute;left:0;right:0;top:62px;text-align:center;font-size:40px;font-weight:900;font-style:italic;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,.35);animation-delay:.4s">${esc(d.initials)}</div>
-      </div></td>
+      </div></td>`}
   </tr></table>`}},
 };
 
@@ -287,9 +288,14 @@ for(const k in DEFAULTS){if(k==="design")continue;
 }
 render();
 document.getElementById("replay").onclick=render;
+/* Kopiert wird eine Version ohne Animations-Tricks: E-Mail-Programme (v. a. Gmail)
+   entfernen Animationen und Positionierungen – diese Version sieht dort trotzdem komplett aus. */
+function staticHtml(){const d=Object.fromEntries(Object.keys(DEFAULTS).map(k=>[k,String(data[k]??"").trim()]));
+  return DESIGNS[d.design].render({...d,_static:true},contacts(d))}
 document.getElementById("copy").onclick=function(){
-  const r=document.createRange();r.selectNode(document.getElementById("signatur"));
-  const s=getSelection();s.removeAllRanges();s.addRange(r);document.execCommand("copy");s.removeAllRanges();
+  const box=document.createElement("div");box.style.cssText="position:fixed;left:-9999px;top:0";box.innerHTML=staticHtml();document.body.appendChild(box);
+  const r=document.createRange();r.selectNode(box);
+  const s=getSelection();s.removeAllRanges();s.addRange(r);document.execCommand("copy");s.removeAllRanges();box.remove();
   this.textContent="✓ Kopiert!";setTimeout(()=>this.textContent="Signatur kopieren",1600);
 };
 </script>

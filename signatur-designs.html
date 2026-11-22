@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signatur-Designs</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 16px 60px;background:#eceef3;font-family:Arial,Helvetica,sans-serif;color:#14161c}
+  .wrap{max-width:680px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 6px}
+  .sub{font-size:14px;color:#5b6070;margin:0 0 28px;line-height:1.5}
+  .item{margin-bottom:40px}
+  .head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .head b{font-size:15px}.head span{font-size:13px;color:#5b6070}
+  .stage{overflow-x:auto;padding:6px}
+  .btns{display:flex;gap:8px}
+  button{padding:8px 14px;border:0;border-radius:8px;background:#14161c;color:#fff;font-size:13px;cursor:pointer}
+  button.ghost{background:#fff;color:#14161c;border:1px solid #d9dce3}
+
+  @keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .i1{animation:in .7s .1s both}.i2{animation:in .7s .25s both}.i3{animation:in .7s .4s both}.i4{animation:in .7s .55s both}
+
+  /* 1 – Neon Night */
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes hue{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+  .neon{position:relative;border-radius:16px;padding:2px;overflow:hidden;width:560px}
+  .neon::before{content:"";position:absolute;inset:-150%;background:conic-gradient(#7c5cff,#00e5ff,#ff4fd8,#7c5cff);animation:spin 4s linear infinite}
+  .neon-in{position:relative;background:#0d0f17;border-radius:14px}
+  .neon-name{background:linear-gradient(90deg,#7c5cff,#00e5ff,#ff4fd8,#7c5cff);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:hue 5s ease infinite, in .7s both}
+
+  /* 2 – Minimal Line */
+  @keyframes draw{from{width:0}to{width:100%}}
+  @keyframes type{from{width:0}to{width:var(--w)}}
+  @keyframes blink{50%{border-color:transparent}}
+  .line{height:2px;background:#14161c;animation:draw 1.1s .3s cubic-bezier(.7,0,.2,1) both}
+  .typed{display:inline-block;overflow:hidden;white-space:nowrap;border-right:2px solid #14161c;vertical-align:bottom;
+    animation:type 1.4s .8s steps(19) both, blink .8s step-end infinite}
+
+  /* 3 – Aurora Glass */
+  @keyframes aurora{0%,100%{background-position:0% 0%}50%{background-position:100% 100%}}
+  .aurora{background:linear-gradient(120deg,#ff9a8b,#a18cd1,#6dd5ed,#fbc2eb);background-size:300% 300%;animation:aurora 8s ease infinite}
+
+  /* 4 – Bold Split */
+  @keyframes ring{to{transform:rotate(360deg)}}
+  @keyframes slideR{from{transform:translateX(-100%)}to{transform:none}}
+  .ring{animation:ring 8s linear infinite}
+  .split-l{animation:slideR .8s cubic-bezier(.2,.8,.2,1) both}
+
+  /* 5 – Terminal */
+  @keyframes typeL{from{width:0}to{width:100%}}
+  .tl{display:block;overflow:hidden;white-space:nowrap;width:0;animation:typeL .9s steps(30) forwards}
+  .cur{display:inline-block;width:8px;height:15px;background:#3dff8a;vertical-align:-2px;animation:blink 1s step-end infinite}
+
+  /* 6 – Slash (aktuell) */
+  @keyframes slashIn{from{opacity:0;transform:translateX(50px) skewX(-25deg)}to{opacity:1;transform:skewX(-25deg)}}
+  @keyframes shine{0%{left:-60%}60%,100%{left:130%}}
+  .slash{position:absolute;top:-10px;bottom:-10px;transform:skewX(-25deg);animation:slashIn .8s cubic-bezier(.2,.8,.2,1) both}
+  .shine{position:relative;overflow:hidden}
+  .shine::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.65),transparent);transform:skewX(-25deg);animation:shine 4.5s 1.2s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>6 Designs zur Auswahl</h1>
+  <p class="sub">Schau sie dir in Ruhe an, sag mir einfach die Nummer und ich baue es in deinen Editor ein (mit Instagram, Telefon usw.).
+  „Nochmal“ spielt die Animation erneut ab.</p>
+
+  <!-- 1 -->
+  <div class="item"><div class="head"><div><b>1 · Neon Night</b> <span>– dunkel, rotierender Leuchtrand</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <div class="neon"><div class="neon-in">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family:Arial,Helvetica,sans-serif;color:#fff">
+        <tr><td style="padding:24px 26px">
+          <div class="neon-name" style="font-size:26px;font-weight:900;letter-spacing:.5px">Niklas Kähler</div>
+          <div class="i2" style="font-size:13px;color:#9aa0b4;margin-top:4px;letter-spacing:2px">DEVELOPER &amp; CREATOR</div>
+          <div class="i3" style="margin-top:16px;font-size:13px;line-height:1.8">
+            <a href="mailto:niklaskaehler14@gmail.com" style="color:#e6e8f0;text-decoration:none">✉&nbsp; niklaskaehler14@gmail.com</a><br>
+            <a href="#" style="color:#e6e8f0;text-decoration:none">☏&nbsp; +49 151 23456789</a></div>
+        </td>
+        <td align="right" style="padding:24px 26px;vertical-align:middle">
+          <a class="i4" href="#" style="display:inline-block;padding:9px 16px;border:1px solid #7c5cff;border-radius:30px;color:#fff;font-size:12px;font-weight:bold;text-decoration:none">@instagram</a>
+        </td></tr>
+      </table>
+    </div></div>
+  </div></div></div>
+
+  <!-- 2 -->
+  <div class="item"><div class="head"><div><b>2 · Minimal Line</b> <span>– edel, Linie zeichnet sich, Schreibmaschine</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;font-family:Georgia,'Times New Roman',serif;color:#14161c;background:#fff;border-radius:4px">
+      <tr><td style="padding:28px 30px">
+        <div class="i1" style="font-size:30px;letter-spacing:-.5px">Niklas Kähler</div>
+        <div style="font-family:'Courier New',monospace;font-size:13px;color:#5b6070;margin-top:6px"><span class="typed" style="--w:19ch">Developer &amp; Creator</span></div>
+        <div style="margin:18px 0 14px"><div class="line"></div></div>
+        <div class="i3" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;letter-spacing:1px;color:#14161c">
+          <a href="mailto:niklaskaehler14@gmail.com" style="color:#14161c;text-decoration:none">NIKLASKAEHLER14@GMAIL.COM</a>
+          &nbsp;&nbsp;/&nbsp;&nbsp;<a href="#" style="color:#14161c;text-decoration:none">+49 151 23456789</a>
+          &nbsp;&nbsp;/&nbsp;&nbsp;<a href="#" style="color:#14161c;text-decoration:none">INSTAGRAM</a></div>
+      </td></tr>
+    </table>
+  </div></div></div>
+
+  <!-- 3 -->
+  <div class="item"><div class="head"><div><b>3 · Aurora Glass</b> <span>– fließender Farbverlauf, Glas-Karte</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table class="aurora" cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;border-radius:18px;background:#a18cd1;font-family:Arial,Helvetica,sans-serif">
+      <tr><td style="padding:16px">
+        <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:rgba(255,255,255,.72);border-radius:12px;color:#1b1530">
+          <tr>
+            <td style="padding:20px 0 20px 22px;width:76px">
+              <div class="i1" style="width:64px;height:64px;border-radius:18px;background:#1b1530;color:#fff;font-size:24px;font-weight:900;line-height:64px;text-align:center">NK</div></td>
+            <td style="padding:20px 22px">
+              <div class="i2" style="font-size:20px;font-weight:bold">Niklas Kähler</div>
+              <div class="i2" style="font-size:13px;color:#5a4f7a">Developer &amp; Creator</div>
+              <div class="i3" style="font-size:12px;margin-top:10px;line-height:1.7">
+                <a href="mailto:niklaskaehler14@gmail.com" style="color:#1b1530;text-decoration:none">niklaskaehler14@gmail.com</a> · <a href="#" style="color:#1b1530;text-decoration:none">+49 151 23456789</a><br>
+                <a href="#" style="color:#7a3cff;text-decoration:none;font-weight:bold">Instagram</a> · <a href="#" style="color:#7a3cff;text-decoration:none;font-weight:bold">TikTok</a></div></td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </div></div></div>
+
+  <!-- 4 -->
+  <div class="item"><div class="head"><div><b>4 · Bold Split</b> <span>– kräftige Farbfläche, rotierender Ring</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;font-family:Arial,Helvetica,sans-serif;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.08)">
+      <tr>
+        <td style="width:170px;padding:0;background:#ff5a36;overflow:hidden">
+          <div class="split-l" style="position:relative;height:170px;background:#ff5a36">
+            <div class="ring" style="position:absolute;left:35px;top:35px;width:100px;height:100px;border-radius:50%;border:3px dashed rgba(255,255,255,.55)"></div>
+            <div style="position:absolute;left:0;right:0;top:63px;text-align:center;color:#fff;font-size:34px;font-weight:900">NK</div>
+          </div></td>
+        <td style="padding:22px 26px;color:#14161c">
+          <div class="i1" style="font-size:24px;font-weight:900;text-transform:uppercase;letter-spacing:-.5px">Niklas Kähler</div>
+          <div class="i2" style="font-size:13px;font-weight:bold;color:#ff5a36;margin-top:2px">Developer &amp; Creator</div>
+          <div class="i3" style="font-size:13px;margin-top:14px;line-height:1.8">
+            <a href="mailto:niklaskaehler14@gmail.com" style="color:#14161c;text-decoration:none">niklaskaehler14@gmail.com</a><br>
+            <a href="#" style="color:#14161c;text-decoration:none">+49 151 23456789</a><br>
+            <a href="#" style="color:#14161c;text-decoration:none;font-weight:bold">@instagram →</a></div></td>
+      </tr>
+    </table>
+  </div></div></div>
+
+  <!-- 5 -->
+  <div class="item"><div class="head"><div><b>5 · Terminal</b> <span>– Hacker-Look, Zeilen tippen sich</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;background:#0b0e0c;border-radius:12px;font-family:'Courier New',Consolas,monospace;font-size:14px;color:#3dff8a">
+      <tr><td style="padding:12px 16px;border-bottom:1px solid #1d2420">
+        <span style="color:#ff5f57">●</span> <span style="color:#febc2e">●</span> <span style="color:#28c840">●</span>
+        <span style="color:#5a6a60;font-size:12px">&nbsp; niklas@signatur ~</span></td></tr>
+      <tr><td style="padding:16px 18px 20px;line-height:1.8">
+        <span class="tl" style="animation-delay:.2s">&gt; <b style="color:#fff">Niklas Kähler</b></span>
+        <span class="tl" style="animation-delay:1.1s;color:#8ab89a">&gt; Developer &amp; Creator</span>
+        <span class="tl" style="animation-delay:2s">&gt; <a href="mailto:niklaskaehler14@gmail.com" style="color:#3dff8a">niklaskaehler14@gmail.com</a></span>
+        <span class="tl" style="animation-delay:2.9s">&gt; <a href="#" style="color:#3dff8a">+49 151 23456789</a> | <a href="#" style="color:#3dff8a">instagram</a></span>
+        <span>&gt; <span class="cur"></span></span>
+      </td></tr>
+    </table>
+  </div></div></div>
+
+  <!-- 6 -->
+  <div class="item"><div class="head"><div><b>6 · Slash</b> <span>– dein aktuelles Design zum Vergleich</span></div>
+    <div class="btns"><button class="ghost" data-replay>Nochmal</button><button data-copy>Kopieren</button></div></div>
+  <div class="stage"><div class="sig">
+    <table class="shine" cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;font-family:Arial,Helvetica,sans-serif;background:#fff;border:1px solid #d9dce3;border-radius:14px;border-collapse:separate">
+      <tr><td style="padding:20px 10px 20px 22px">
+          <div class="i1" style="font-size:20px;font-weight:300;letter-spacing:5px"><span style="font-weight:900;font-style:italic;letter-spacing:-2px;color:#6c5ce7">//</span> NIKLAS</div>
+          <div class="i2" style="font-size:19px;font-weight:bold;margin-top:12px">Niklas Kähler <span style="display:inline-block;width:16px;height:16px;line-height:16px;border-radius:50%;background:#2f80ff;color:#fff;font-size:10px;text-align:center;vertical-align:2px">✓</span></div>
+          <div class="i2" style="font-size:13px;color:#5b6070">Developer &amp; Creator</div>
+          <div class="i3" style="font-size:12px;line-height:1.7;margin-top:12px;color:#5b6070">niklaskaehler14@gmail.com<br>+49 151 23456789</div></td>
+        <td style="width:170px;padding:0"><div style="position:relative;width:170px;height:170px;overflow:hidden;border-radius:0 13px 13px 0">
+          <div class="slash" style="left:30px;width:34px;background:#14161c;animation-delay:.2s"></div>
+          <div class="slash" style="left:72px;width:46px;background:linear-gradient(160deg,#6c5ce7,#00b4d8);animation-delay:.35s"></div>
+          <div class="slash" style="left:126px;width:24px;background:#c9ccd4;animation-delay:.5s"></div>
+          <div class="i3" style="position:absolute;left:0;right:0;top:62px;text-align:center;font-size:40px;font-weight:900;font-style:italic;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.35)">NK</div></div></td></tr>
+    </table>
+  </div></div></div>
+</div>
+
+<script>
+document.querySelectorAll("[data-replay]").forEach(b=>b.onclick=()=>{
+  const sig=b.closest(".item").querySelector(".sig");sig.innerHTML=sig.innerHTML;});
+document.querySelectorAll("[data-copy]").forEach(b=>b.onclick=()=>{
+  const r=document.createRange();r.selectNode(b.closest(".item").querySelector(".sig"));
+  const s=getSelection();s.removeAllRanges();s.addRange(r);document.execCommand("copy");s.removeAllRanges();
+  b.textContent="✓ Kopiert";setTimeout(()=>b.textContent="Kopieren",1600);});
+</script>
+</body>
+</html>

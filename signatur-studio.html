@@ -100,6 +100,13 @@
       </div>
       <p class="hint"><b>Gmail:</b> „Signatur kopieren“ → Einstellungen → Alle Einstellungen → Signatur → einfügen.<br>
       Animationen laufen in Apple Mail, iPhone und Thunderbird. Gmail und Outlook zeigen die Signatur ohne Bewegung.</p>
+      <div class="panel" style="margin-top:18px">
+        <b>Für Gmail: Signatur als animiertes Bild</b>
+        <p class="hint" style="margin-top:6px">Gmail spielt keine Code-Animationen ab, aber animierte GIF-Bilder. Hier wird deine Signatur mit allen Animationen in ein GIF umgewandelt. Das passiert komplett in deinem Browser.</p>
+        <p class="hint" id="gifnote" style="color:#b5651d"></p>
+        <button type="button" class="b" id="mkgif">GIF erstellen</button>
+        <div id="gifout"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -286,5 +293,183 @@ document.getElementById("copy").onclick=function(){
   this.textContent="✓ Kopiert!";setTimeout(()=>this.textContent="Signatur kopieren",1600);
 };
 </script>
+<script>
+/* ================= GIF-Export für Gmail =================
+   Gmail zeigt keine CSS-Animationen, aber animierte GIFs.
+   Das Slash-Design wird hier Bild für Bild auf ein Canvas gezeichnet
+   und mit einem eingebauten GIF-Encoder (ohne externe Bibliothek) gespeichert. */
+const GX={W:560,S:2,FPS:20,DUR:3400};
+const ease=t=>1-Math.pow(1-t,3);
+const easeIO=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const back=t=>{const c1=2.2,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)};
+const prog=(ms,delay,dur)=>Math.min(1,Math.max(0,(ms-delay)/dur));
+const SK=Math.tan(-25*Math.PI/180);
+
+function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+
+function drawIcon(ctx,k,cx,cy){
+  ctx.save();ctx.translate(cx,cy);ctx.textAlign="center";ctx.textBaseline="middle";
+  const box=f=>{rr(ctx,-9,-9,18,18,5);ctx.fillStyle=f;ctx.fill()};
+  if(k==="insta"){const g=ctx.createLinearGradient(-9,9,9,-9);
+    g.addColorStop(0,"#feda75");g.addColorStop(.35,"#fa7e1e");g.addColorStop(.65,"#d62976");g.addColorStop(1,"#4f5bd5");box(g);
+    ctx.strokeStyle="#fff";ctx.lineWidth=1.6;rr(ctx,-5.5,-5.5,11,11,3.5);ctx.stroke();
+    ctx.beginPath();ctx.arc(0,0,2.6,0,7);ctx.stroke();ctx.beginPath();ctx.arc(3.4,-3.4,.9,0,7);ctx.fillStyle="#fff";ctx.fill()}
+  else if(k==="tiktok"){box("#111");ctx.font="bold 13px Arial";
+    ctx.fillStyle="#25f4ee";ctx.fillText("♪",-.9,.7);ctx.fillStyle="#fe2c55";ctx.fillText("♪",.9,-.3);ctx.fillStyle="#fff";ctx.fillText("♪",0,.2)}
+  else if(k==="whatsapp"){ctx.beginPath();ctx.arc(0,0,9,0,7);ctx.fillStyle="#25d366";ctx.fill();
+    ctx.strokeStyle="#fff";ctx.lineWidth=1.4;ctx.beginPath();ctx.arc(0,0,5.2,0,7);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(-4.5,3);ctx.lineTo(-5.8,5.8);ctx.lineTo(-2.6,4.7);ctx.stroke()}
+  else if(k==="linkedin"){box("#0a66c2");ctx.font="bold 11px Arial";ctx.fillStyle="#fff";ctx.fillText("in",0,1)}
+  else{ctx.fillStyle="#14161c";ctx.font=(k==="phone"?"15px":"14px")+" Arial";ctx.fillText({mail:"✉",phone:"☏",web:"◎"}[k]||"•",0,1)}
+  ctx.restore();
+}
+
+function gifLayout(c){const n=c.length;const boxH=n?n*26+(n-1)*6+20:0;return {n,boxH,H:Math.max(170,boxH+36)}}
+
+function drawSlash(ctx,ms,d,c){
+  const {W,S}=GX,{n,boxH,H}=gifLayout(c);
+  ctx.setTransform(S,0,0,S,0,0);ctx.globalAlpha=1;ctx.shadowColor="transparent";
+  ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);
+  ctx.save();rr(ctx,.5,.5,W-1,H-1,14);ctx.clip();
+
+  /* Streifen rechts */
+  const SX=W-170,cy=H/2;
+  ctx.save();ctx.beginPath();ctx.rect(SX,0,170,H);ctx.clip();
+  [[30,34,"#14161c",200],[72,46,"grad",350],[126,24,"#c9ccd4",500]].forEach(([l,w,col,del])=>{
+    const p=ease(prog(ms,del,800));if(!p)return;
+    ctx.save();ctx.globalAlpha=p;ctx.translate(SX+50*(1-p),0);
+    const top=-10,bot=H+10,dt=-SK*(cy-top),db=-SK*(cy-bot);
+    ctx.beginPath();ctx.moveTo(l+dt,top);ctx.lineTo(l+w+dt,top);ctx.lineTo(l+w+db,bot);ctx.lineTo(l+db,bot);ctx.closePath();
+    if(col==="grad"){const g=ctx.createLinearGradient(l+20,0,l,H);g.addColorStop(0,"#6c5ce7");g.addColorStop(1,"#00b4d8");ctx.fillStyle=g}else ctx.fillStyle=col;
+    ctx.fill();ctx.restore()});
+  {const p=ease(prog(ms,400,700));if(p){ctx.save();ctx.globalAlpha=p;ctx.font="italic 900 40px Arial";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.shadowColor="rgba(0,0,0,.35)";ctx.shadowBlur=12*S;ctx.shadowOffsetY=2*S;ctx.fillStyle="#fff";ctx.fillText(d.initials,SX+85,cy+8*(1-p));ctx.restore()}}
+  ctx.restore();
+
+  /* Social-Leiste */
+  if(n){const by=(H-boxH)/2;ctx.strokeStyle="#d9dce3";ctx.lineWidth=1;rr(ctx,18.5,by+.5,40,boxH-1,10);ctx.stroke();
+    c.forEach((x,i)=>{const p=prog(ms,300+i*100,500);if(!p)return;const s=back(p);
+      ctx.save();ctx.globalAlpha=Math.min(1,p*2);ctx.translate(38.5,by+10+13+i*32);ctx.scale(s,s);drawIcon(ctx,x.k,0,0);ctx.restore()})}
+
+  /* Text */
+  const tx=n?76:22, maxW=SX-tx-10;
+  const lines=c.filter(x=>["mail","phone","web"].includes(x.k)).map(x=>x.text);
+  let h=0;if(d.brand)h+=24+12;h+=22;if(d.title)h+=20;if(lines.length)h+=12+lines.length*20;
+  let y=(H-h)/2;
+  const fade=(del,fn)=>{const p=ease(prog(ms,del,700));if(!p)return;ctx.save();ctx.globalAlpha=p;ctx.translate(0,8*(1-p));fn();ctx.restore()};
+  ctx.textBaseline="middle";ctx.textAlign="left";
+  if(d.brand){const yy=y+12;fade(0,()=>{
+      ctx.font="italic 900 20px Arial";ctx.fillStyle="#6c5ce7";ctx.fillText("/",tx,yy);ctx.fillText("/",tx+7,yy);
+      ctx.font="300 20px Arial";ctx.fillStyle="#14161c";let xx=tx+26;
+      for(const ch of d.brand.toUpperCase()){if(xx>tx+maxW)break;ctx.fillText(ch,xx,yy);xx+=ctx.measureText(ch).width+5}});
+    y+=36}
+  {const yy=y+11;fade(100,()=>{ctx.font="bold 19px Arial";ctx.fillStyle="#14161c";ctx.fillText(d.name,tx,yy,maxW-26);
+      const bx=tx+Math.min(ctx.measureText(d.name).width,maxW-26)+14,s=1+.18*Math.sin(Math.PI*prog(ms,1500,1200));
+      ctx.save();ctx.translate(bx,yy);ctx.scale(s,s);ctx.beginPath();ctx.arc(0,0,8,0,7);ctx.fillStyle="#2f80ff";ctx.fill();
+      ctx.strokeStyle="#fff";ctx.lineWidth=1.8;ctx.beginPath();ctx.moveTo(-3.5,0);ctx.lineTo(-1,2.6);ctx.lineTo(3.8,-2.6);ctx.stroke();ctx.restore()});
+    y+=22}
+  if(d.title){const yy=y+11;fade(250,()=>{ctx.font="13px Arial";ctx.fillStyle="#5b6070";ctx.fillText(d.title,tx,yy,maxW)});y+=20}
+  if(lines.length){y+=12;const y0=y;fade(550,()=>{ctx.font="12px Arial";ctx.fillStyle="#5b6070";lines.forEach((t,i)=>ctx.fillText(t,tx,y0+10+i*20,maxW))})}
+
+  /* Glanz */
+  {const p=prog(ms,1700,1500);if(p>0&&p<1){const x=-.6*W+easeIO(p)*1.9*W,bw=.4*W;
+    ctx.save();ctx.translate(0,cy);ctx.transform(1,0,SK,1,0,0);ctx.translate(0,-cy);
+    const g=ctx.createLinearGradient(x,0,x+bw,0);g.addColorStop(0,"rgba(255,255,255,0)");g.addColorStop(.5,"rgba(255,255,255,.65)");g.addColorStop(1,"rgba(255,255,255,0)");
+    ctx.fillStyle=g;ctx.fillRect(x,-20,bw,H+40);ctx.restore()}}
+  ctx.restore();
+  ctx.strokeStyle="#d9dce3";ctx.lineWidth=1;rr(ctx,.5,.5,W-1,H-1,14);ctx.stroke();
+}
+
+/* --- GIF-Encoder (GIF89a, globale 256-Farben-Palette, LZW) --- */
+function lzw(idx,out){
+  const min=8,clear=256,eoi=257;let size=9,next=258,dict=new Map(),cur=0,bits=0;const buf=[];
+  const emit=c=>{cur|=c<<bits;bits+=size;while(bits>=8){buf.push(cur&255);cur>>>=8;bits-=8}};
+  out.push(min);emit(clear);let prefix=idx[0];
+  for(let i=1;i<idx.length;i++){const k=idx[i],key=(prefix<<8)|k,v=dict.get(key);
+    if(v!==undefined){prefix=v;continue}
+    emit(prefix);
+    if(next===4096){emit(clear);dict=new Map();size=9;next=258}
+    else{if(next>=(1<<size))size++;dict.set(key,next++)}
+    prefix=k}
+  emit(prefix);emit(eoi);if(bits>0)buf.push(cur&255);
+  for(let i=0;i<buf.length;i+=255){const m=Math.min(255,buf.length-i);out.push(m);for(let j=0;j<m;j++)out.push(buf[i+j])}
+  out.push(0);
+}
+
+async function makeGif(d,c,onStep){
+  const {W,S,FPS,DUR}=GX,{H}=gifLayout(c),w=W*S,h=H*S;
+  const cv=document.createElement("canvas");cv.width=w;cv.height=h;const ctx=cv.getContext("2d",{willReadFrequently:true});
+  const N=Math.round(DUR/1000*FPS)+1,times=[...Array(N)].map((_,i)=>i*1000/FPS);
+  const key=(r,g,b)=>((r>>3)<<10)|((g>>3)<<5)|(b>>3);
+  /* Durchgang 1: Farben zählen */
+  const hist=new Uint32Array(32768),sum=new Float64Array(32768*3);
+  for(let f=0;f<N;f++){drawSlash(ctx,times[f],d,c);const px=ctx.getImageData(0,0,w,h).data;
+    for(let i=0;i<px.length;i+=4){const k=key(px[i],px[i+1],px[i+2]);hist[k]++;sum[k*3]+=px[i];sum[k*3+1]+=px[i+1];sum[k*3+2]+=px[i+2]}
+    if(f%10===0){onStep(`Farben analysieren … ${Math.round(f/N*40)} %`);await new Promise(r=>setTimeout(r))}}
+  const keys=[...Array(32768).keys()].filter(k=>hist[k]).sort((a,b)=>hist[b]-hist[a]).slice(0,256);
+  const avg=k=>hist[k]?[0,1,2].map(j=>Math.round(sum[k*3+j]/hist[k])):[((k>>10)&31)*8+4,((k>>5)&31)*8+4,(k&31)*8+4];
+  const pal=keys.map(avg);
+  while(pal.length<256)pal.push([0,0,0]);
+  const map=new Int16Array(32768).fill(-1);
+  const nearest=k=>{const [r,g,b]=avg(k);let best=0,bd=1e9;
+    for(let i=0;i<256;i++){const p=pal[i],dd=(p[0]-r)**2*3+(p[1]-g)**2*4+(p[2]-b)**2*2;if(dd<bd){bd=dd;best=i}}return best};
+  /* Durchgang 2: Bilder zeichnen und kodieren */
+  const out=[];const b=x=>out.push(x&255),w16=x=>{b(x);b(x>>8)};
+  for(const ch of "GIF89a")b(ch.charCodeAt(0));w16(w);w16(h);b(0xF7);b(0);b(0);
+  pal.forEach(p=>{b(p[0]);b(p[1]);b(p[2])});
+  /* Nur der geänderte Bildausschnitt wird gespeichert – das macht die Datei viel kleiner */
+  let idx=new Uint8Array(w*h),prev=null,delayPos=-1;const step=Math.round(100/FPS);
+  for(let f=0;f<N;f++){drawSlash(ctx,times[f],d,c);const px=ctx.getImageData(0,0,w,h).data;
+    for(let i=0,j=0;i<px.length;i+=4,j++){const k=key(px[i],px[i+1],px[i+2]);let m=map[k];if(m<0)m=map[k]=nearest(k);idx[j]=m}
+    let x0=0,y0=0,x1=w-1,y1=h-1;
+    if(prev){x0=w;y0=h;x1=-1;y1=-1;
+      for(let yy=0;yy<h;yy++)for(let xx=0,o=yy*w;xx<w;xx++,o++)if(idx[o]!==prev[o]){if(xx<x0)x0=xx;if(xx>x1)x1=xx;if(yy<y0)y0=yy;if(yy>y1)y1=yy}
+      if(x1<0){const v=out[delayPos]|(out[delayPos+1]<<8);const nv=v+step;out[delayPos]=nv&255;out[delayPos+1]=nv>>8;continue}}
+    const sw=x1-x0+1,sh=y1-y0+1,sub=new Uint8Array(sw*sh);
+    for(let yy=0;yy<sh;yy++)sub.set(idx.subarray((y0+yy)*w+x0,(y0+yy)*w+x0+sw),yy*sw);
+    b(0x21);b(0xF9);b(4);b(4);delayPos=out.length;w16(step);b(0);b(0);
+    b(0x2C);w16(x0);w16(y0);w16(sw);w16(sh);b(0);lzw(sub,out);
+    prev=idx;idx=new Uint8Array(w*h);
+    if(f%5===0){onStep(`GIF erstellen … ${40+Math.round(f/N*60)} %`);await new Promise(r=>setTimeout(r))}}
+  b(0x3B);
+  return new Blob([new Uint8Array(out)],{type:"image/gif"});
+}
+
+/* --- Oberfläche --- */
+const gifBtn=document.getElementById("mkgif"),gifOut=document.getElementById("gifout"),gifNote=document.getElementById("gifnote");
+let gifUrl=null;
+function currentData(){return Object.fromEntries(Object.keys(DEFAULTS).map(k=>[k,String(data[k]??"").trim()]))}
+function gifUI(){const ok=data.design==="slash";gifBtn.disabled=!ok;gifBtn.style.opacity=ok?1:.4;
+  gifNote.textContent=ok?"":"Der GIF-Export gibt es im Moment für das Slash-Design. Wähl oben „Slash“ aus."}
+const _render=render;render=function(){_render();gifUI()};gifUI();
+
+gifBtn.onclick=async()=>{
+  const d=currentData(),c=contacts(d);gifBtn.disabled=true;gifOut.innerHTML="";
+  try{
+    const blob=await makeGif(d,c,t=>gifBtn.textContent=t);
+    if(gifUrl)URL.revokeObjectURL(gifUrl);gifUrl=URL.createObjectURL(blob);
+    const row=c.map(x=>`<a href="${esc(x.href)}" style="color:#5b6070;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:12px">${esc(x.label)}</a>`).join('<span style="color:#c9ccd4;font-family:Arial,sans-serif;font-size:12px">&nbsp; · &nbsp;</span>');
+    gifOut.innerHTML=`
+      <img src="${gifUrl}" width="${GX.W}" alt="Signatur" style="display:block;max-width:100%;margin-top:14px;border-radius:14px">
+      <div id="linkrow" style="margin-top:8px">${row}</div>
+      <div class="btns">
+        <a class="b" href="${gifUrl}" download="signatur.gif" style="padding:10px 16px;border-radius:7px;background:#151515;color:#fff;font-size:14px;text-decoration:none">GIF herunterladen (${Math.round(blob.size/1024)} KB)</a>
+        <button type="button" class="b ghost" id="copyrow">Link-Zeile kopieren</button>
+      </div>
+      <ol class="hint" style="padding-left:18px">
+        <li>„GIF herunterladen“ klicken.</li>
+        <li>Die Datei in <b>Google Drive</b> hochladen. Rechtsklick → Freigeben → „Jeder mit dem Link“.</li>
+        <li>Gmail → Einstellungen → Alle Einstellungen → Signatur → <b>Bild-Symbol</b> → Google Drive → <i>signatur.gif</i> auswählen.</li>
+        <li>Optional: Bild anklicken → Link-Symbol → z. B. dein Instagram eintragen.</li>
+        <li>Unter dem Bild Enter drücken, „Link-Zeile kopieren“ klicken und einfügen. So bleiben Instagram, WhatsApp und Co. klickbar.</li>
+      </ol>`;
+    document.getElementById("copyrow").onclick=function(){
+      const r=document.createRange();r.selectNode(document.getElementById("linkrow"));const s=getSelection();s.removeAllRanges();s.addRange(r);
+      document.execCommand("copy");s.removeAllRanges();this.textContent="✓ Kopiert!";setTimeout(()=>this.textContent="Link-Zeile kopieren",1600)};
+  }catch(e){gifOut.innerHTML=`<p class="hint" style="color:#c0392b">Fehler beim Erstellen: ${esc(e.message)}</p>`}
+  gifBtn.textContent="GIF erstellen";gifUI();
+};
+</script>
+
 </body>
 </html>

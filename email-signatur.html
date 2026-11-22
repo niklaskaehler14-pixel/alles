@@ -5,101 +5,143 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E-Mail-Signatur</title>
 <style>
-  body{margin:0;padding:40px 16px;background:#eceef3;font-family:Arial,Helvetica,sans-serif;color:#14161c}
-  .hint{max-width:600px;margin:0 auto 24px;font-size:14px;line-height:1.5;color:#555}
-  .stage{max-width:600px;margin:0 auto;overflow-x:auto}
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 16px;background:#eceef3;font-family:Arial,Helvetica,sans-serif;color:#14161c}
+  .wrap{max-width:900px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{font-size:14px;color:#5b6070;margin:0 0 24px}
+  .grid{display:grid;grid-template-columns:300px 1fr;gap:24px;align-items:start}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .panel{background:#fff;border-radius:14px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,.05)}
+  label{display:block;font-size:12px;font-weight:bold;color:#5b6070;margin:12px 0 4px}
+  label:first-child{margin-top:0}
+  input{width:100%;padding:9px 11px;border:1px solid #d9dce3;border-radius:8px;font-size:14px;font-family:inherit}
+  input:focus{outline:none;border-color:#6c5ce7;box-shadow:0 0 0 3px rgba(108,92,231,.15)}
+  .note{font-size:12px;color:#8a8f9c;margin-top:4px}
+  .stage{overflow-x:auto;padding:4px}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  button{padding:11px 18px;border:0;border-radius:8px;background:#14161c;color:#fff;font-size:14px;cursor:pointer}
+  button.ghost{background:#fff;color:#14161c;border:1px solid #d9dce3}
+  .hint{font-size:13px;line-height:1.5;color:#5b6070;margin-top:16px}
 
-  /* ---------- Animationen ---------- */
+  /* ---------- Signatur-Animationen ---------- */
   @keyframes sigIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-  @keyframes slashIn{from{opacity:0;transform:translateX(40px) skewX(-25deg)}to{opacity:1;transform:skewX(-25deg)}}
+  @keyframes slashIn{from{opacity:0;transform:translateX(50px) skewX(-25deg)}to{opacity:1;transform:skewX(-25deg)}}
   @keyframes shine{0%{left:-60%}60%,100%{left:130%}}
   @keyframes badge{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
   @keyframes iconPop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
   @keyframes letter{0%,100%{letter-spacing:5px}50%{letter-spacing:7px}}
-
   .sig-card{position:relative;overflow:hidden}
   .sig-card::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;
     background:linear-gradient(100deg,transparent,rgba(255,255,255,.65),transparent);
     transform:skewX(-25deg);animation:shine 4.5s 1.2s ease-in-out infinite;pointer-events:none}
-  .a1{animation:sigIn .7s .1s ease-out both}
-  .a2{animation:sigIn .7s .25s ease-out both}
-  .a3{animation:sigIn .7s .4s ease-out both}
-  .a4{animation:sigIn .7s .55s ease-out both}
-  .brand{animation:sigIn .7s ease-out both, letter 6s 1s ease-in-out infinite}
+  .a1{animation:sigIn .7s .1s ease-out both}.a2{animation:sigIn .7s .25s ease-out both}
+  .a3{animation:sigIn .7s .4s ease-out both}.a4{animation:sigIn .7s .55s ease-out both}
+  .brand{animation:sigIn .7s ease-out both,letter 6s 1s ease-in-out infinite}
   .ic{display:block;animation:iconPop .5s cubic-bezier(.3,1.6,.5,1) both}
-  .ic:nth-child(1){animation-delay:.3s}.ic:nth-child(2){animation-delay:.4s}
-  .ic:nth-child(3){animation-delay:.5s}.ic:nth-child(4){animation-delay:.6s}
   .ic:hover{background:#14161c !important;color:#fff !important}
   .badge{display:inline-block;animation:badge 2.4s 1.5s ease-in-out infinite}
   .slash{position:absolute;top:-10px;bottom:-10px;transform:skewX(-25deg);animation:slashIn .8s cubic-bezier(.2,.8,.2,1) both}
   .lnk:hover{color:#6c5ce7 !important}
-
-  button{margin-top:20px;padding:11px 20px;border:0;border-radius:8px;background:#14161c;color:#fff;font-size:14px;cursor:pointer}
 </style>
 </head>
 <body>
-<p class="hint"><b>So nutzt du sie:</b> Klick auf „Signatur kopieren“ und füg sie in Gmail ein: <i>Einstellungen → Alle Einstellungen → Signatur</i>.<br>
-Wenn du ein Foto willst, schick es mir und ich bau es in die Slashes rechts ein.</p>
+<div class="wrap">
+  <h1>Deine E-Mail-Signatur</h1>
+  <p class="sub">Links ausfüllen, rechts siehst du sofort das Ergebnis. Leere Felder werden automatisch ausgeblendet.</p>
 
-<div class="stage">
-<!-- ===== SIGNATUR START ===== -->
-<div id="signatur">
+  <div class="grid">
+    <form class="panel" id="form" autocomplete="off">
+      <label for="name">Name</label><input id="name">
+      <label for="title">Titel / Rolle</label><input id="title">
+      <label for="brand">Schriftzug oben</label><input id="brand">
+      <label for="email">E-Mail</label><input id="email" type="email">
+      <label for="phone">Telefon</label><input id="phone" type="tel" placeholder="+49 151 23456789">
+      <label for="instagram">Instagram</label><input id="instagram" placeholder="deinname">
+      <div class="note">Nur der Benutzername, ohne @</div>
+      <label for="tiktok">TikTok</label><input id="tiktok" placeholder="deinname">
+      <label for="linkedin">LinkedIn</label><input id="linkedin" placeholder="linkedin.com/in/deinname">
+      <label for="website">Website</label><input id="website" placeholder="deine-seite.de">
+      <label for="initials">Initialen in der Grafik</label><input id="initials" maxlength="3">
+    </form>
+
+    <div>
+      <div class="stage"><div id="signatur"></div></div>
+      <div class="btns">
+        <button type="button" id="copy">Signatur kopieren</button>
+        <button type="button" class="ghost" id="replay">Animation nochmal abspielen</button>
+      </div>
+      <p class="hint"><b>Einfügen in Gmail:</b> „Signatur kopieren“ → Einstellungen → Alle Einstellungen → Signatur → einfügen.<br>
+      <b>Apple Mail / iPhone:</b> Hier laufen auch alle Animationen.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const DEFAULTS={name:"Niklas Kähler",title:"Developer & Creator",brand:"NIKLAS",
+  email:"niklaskaehler14@gmail.com",phone:"",instagram:"",tiktok:"",linkedin:"",website:"",initials:"NK"};
+const KEY="sig-daten-v1";
+let data={...DEFAULTS};
+try{Object.assign(data,JSON.parse(localStorage.getItem(KEY)||"{}"))}catch(e){}
+
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const url=u=>/^https?:\/\//i.test(u)?u:"https://"+u;
+const clean=u=>u.replace(/^https?:\/\//i,"").replace(/\/$/,"");
+
+function render(){
+  const d=Object.fromEntries(Object.entries(data).map(([k,v])=>[k,String(v).trim()]));
+  const icons=[], lines=[];
+  if(d.email){icons.push(["mailto:"+d.email,"✉","E-Mail",14]);
+    lines.push(`<a class="lnk" href="mailto:${esc(d.email)}" style="color:#5b6070;text-decoration:none">${esc(d.email)}</a>`)}
+  if(d.phone){const tel=d.phone.replace(/[^\d+]/g,"");icons.push(["tel:"+tel,"☏","Telefon",15]);
+    lines.push(`<a class="lnk" href="tel:${esc(tel)}" style="color:#5b6070;text-decoration:none">${esc(d.phone)}</a>`)}
+  if(d.website){lines.push(`<a class="lnk" href="${esc(url(d.website))}" style="color:#5b6070;text-decoration:none">${esc(clean(d.website))}</a>`);
+    icons.push([url(d.website),"◎","Website",14])}
+  if(d.instagram){const u=d.instagram.replace(/^@/,"");icons.push(["https://instagram.com/"+u,"IG","Instagram",11])}
+  if(d.tiktok){const u=d.tiktok.replace(/^@/,"");icons.push(["https://tiktok.com/@"+u,"TT","TikTok",11])}
+  if(d.linkedin){icons.push([url(d.linkedin),"in","LinkedIn",12])}
+
+  const iconHtml=icons.map(([h,t,ti,fs],i)=>
+    `<a class="ic" href="${esc(h)}" title="${ti}" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:${fs}px;font-weight:bold;${i?"margin-top:6px;":""}animation-delay:${.3+i*.1}s">${esc(t)}</a>`).join("");
+
+  const sideCol=icons.length?`<td style="padding:18px 0 18px 18px;vertical-align:middle;width:40px">
+      <table cellpadding="0" cellspacing="0" border="0" style="border:1px solid #d9dce3;border-radius:10px;padding:6px 4px"><tr><td align="center" style="padding:4px">${iconHtml}</td></tr></table></td>`:"";
+
+  document.getElementById("signatur").innerHTML=`
 <table class="sig-card" cellpadding="0" cellspacing="0" border="0" width="560"
   style="width:560px;font-family:Arial,Helvetica,sans-serif;color:#14161c;background:#ffffff;border:1px solid #d9dce3;border-radius:14px;border-collapse:separate;box-shadow:0 10px 30px rgba(20,22,28,.08)">
-  <tr>
-    <!-- Social-Leiste -->
-    <td style="padding:18px 0 18px 18px;vertical-align:middle;width:40px">
-      <table cellpadding="0" cellspacing="0" border="0" style="border:1px solid #d9dce3;border-radius:10px;padding:6px 4px">
-        <tr><td align="center" style="padding:4px">
-          <a class="ic" href="https://github.com/niklaskaehler14-pixel" title="GitHub" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:12px;font-weight:bold">GH</a>
-          <a class="ic" href="mailto:tik072343@gmail.com" title="E-Mail" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:14px;margin-top:6px">✉</a>
-          <a class="ic" href="#" title="Instagram" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:12px;font-weight:bold;margin-top:6px">IG</a>
-          <a class="ic" href="#" title="Website" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:14px;margin-top:6px">◎</a>
-        </td></tr>
-      </table>
-    </td>
-
-    <!-- Text -->
+  <tr>${sideCol}
     <td style="padding:20px 10px 20px 18px;vertical-align:middle">
-      <div class="brand" style="font-size:20px;font-weight:300;letter-spacing:5px;color:#14161c">
-        <span style="font-weight:900;font-style:italic;letter-spacing:-2px;color:#6c5ce7">//</span> NIKLAS
-      </div>
-      <div class="a1" style="font-size:19px;font-weight:bold;margin-top:12px">
-        Niklas Kähler
-        <span class="badge" style="width:16px;height:16px;line-height:16px;border-radius:50%;background:#2f80ff;color:#fff;font-size:10px;text-align:center;vertical-align:2px">✓</span>
-      </div>
-      <div class="a2" style="font-size:13px;color:#5b6070;margin-top:2px">Developer &amp; Creator</div>
-      <div class="a3" style="font-size:11px;font-weight:bold;letter-spacing:1.5px;margin-top:12px">NIKLAS KÄHLER™</div>
-      <div class="a4" style="font-size:12px;line-height:1.6;margin-top:2px">
-        <a class="lnk" href="mailto:tik072343@gmail.com" style="color:#5b6070;text-decoration:none">tik072343@gmail.com</a><br>
-        <a class="lnk" href="https://github.com/niklaskaehler14-pixel" style="color:#5b6070;text-decoration:none">github.com/niklaskaehler14-pixel</a>
-      </div>
+      ${d.brand?`<div class="brand" style="font-size:20px;font-weight:300;letter-spacing:5px;color:#14161c"><span style="font-weight:900;font-style:italic;letter-spacing:-2px;color:#6c5ce7">//</span> ${esc(d.brand.toUpperCase())}</div>`:""}
+      <div class="a1" style="font-size:19px;font-weight:bold;margin-top:${d.brand?12:0}px">${esc(d.name)}
+        <span class="badge" style="width:16px;height:16px;line-height:16px;border-radius:50%;background:#2f80ff;color:#fff;font-size:10px;text-align:center;vertical-align:2px">✓</span></div>
+      ${d.title?`<div class="a2" style="font-size:13px;color:#5b6070;margin-top:2px">${esc(d.title)}</div>`:""}
+      ${lines.length?`<div class="a4" style="font-size:12px;line-height:1.7;margin-top:12px">${lines.join("<br>")}</div>`:""}
     </td>
-
-    <!-- Slash-Grafik -->
     <td style="width:170px;padding:0;vertical-align:middle">
       <div style="position:relative;width:170px;height:170px;overflow:hidden;border-radius:0 13px 13px 0">
         <div class="slash" style="left:30px;width:34px;background:#14161c;animation-delay:.2s"></div>
         <div class="slash" style="left:72px;width:46px;background:linear-gradient(160deg,#6c5ce7,#00b4d8);animation-delay:.35s"></div>
         <div class="slash" style="left:126px;width:24px;background:#c9ccd4;animation-delay:.5s"></div>
-        <div class="a3" style="position:absolute;left:0;right:0;top:62px;text-align:center;font-size:40px;font-weight:900;font-style:italic;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,.35)">NK</div>
+        <div class="a3" style="position:absolute;left:0;right:0;top:62px;text-align:center;font-size:40px;font-weight:900;font-style:italic;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,.35)">${esc(d.initials)}</div>
       </div>
     </td>
   </tr>
-</table>
-</div>
-<!-- ===== SIGNATUR ENDE ===== -->
-</div>
-
-<div style="text-align:center"><button onclick="copySig(this)">Signatur kopieren</button></div>
-
-<script>
-function copySig(btn){
-  const r=document.createRange();r.selectNode(document.getElementById('signatur'));
-  const s=getSelection();s.removeAllRanges();s.addRange(r);
-  document.execCommand('copy');s.removeAllRanges();
-  btn.textContent='✓ Kopiert!';
+</table>`;
 }
+
+const form=document.getElementById("form");
+for(const k in DEFAULTS){const el=document.getElementById(k);el.value=data[k];
+  el.addEventListener("input",()=>{data[k]=el.value;try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}render()})}
+render();
+
+document.getElementById("replay").onclick=render;
+document.getElementById("copy").onclick=function(){
+  const r=document.createRange();r.selectNode(document.getElementById("signatur"));
+  const s=getSelection();s.removeAllRanges();s.addRange(r);
+  document.execCommand("copy");s.removeAllRanges();
+  this.textContent="✓ Kopiert!";setTimeout(()=>this.textContent="Signatur kopieren",1800);
+};
 </script>
 </body>
 </html>

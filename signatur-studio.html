@@ -79,6 +79,8 @@
       <label for="location">Ort</label><input id="location" placeholder="z. B. Hamburg">
       <label for="email">E-Mail</label><input id="email" type="email">
       <label for="phone">Telefon</label><input id="phone" type="tel" placeholder="+49 151 23456789">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:normal;color:#151515;margin-top:8px"><input id="whatsapp" type="checkbox" style="width:auto"> Auch per WhatsApp erreichbar</label>
+      <div class="note">Am besten mit Ländervorwahl (+49 …)</div>
       <label for="instagram">Instagram</label><input id="instagram" placeholder="deinname">
       <div class="note">Nur der Benutzername, ohne @</div>
       <label for="tiktok">TikTok</label><input id="tiktok" placeholder="deinname">
@@ -105,8 +107,10 @@
 <script>
 /* ---------- Daten ---------- */
 const DEFAULTS={name:"Niklas Kähler",title:"Developer & Creator",location:"",email:"niklaskaehler14@gmail.com",
-  phone:"",instagram:"",tiktok:"",linkedin:"",website:"",initials:"NK",brand:"NIKLAS",status:"Verfügbar für Projekte",design:"boot"};
+  phone:"",instagram:"",tiktok:"",linkedin:"",website:"",initials:"NK",brand:"NIKLAS",whatsapp:true,status:"Verfügbar für Projekte",design:"boot"};
 const KEY="sig-studio-v2";
+/* Logos: offizielles Website-Icon (Favicon) über Googles Favicon-Dienst – funktioniert auch in Gmail */
+const logo=domain=>"https://www.google.com/s2/favicons?sz=64&domain="+encodeURIComponent(domain);
 let data={...DEFAULTS};
 try{Object.assign(data,JSON.parse(localStorage.getItem(KEY)||"{}"))}catch(e){}
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}};
@@ -119,11 +123,16 @@ const bare=u=>u.replace(/^https?:\/\//i,"").replace(/^www\./,"").replace(/\/$/,"
 function contacts(d){
   const c=[];
   if(d.email)c.push({k:"mail",label:"E-Mail",text:d.email,href:"mailto:"+d.email});
-  if(d.phone)c.push({k:"phone",label:"Telefon",text:d.phone,href:"tel:"+d.phone.replace(/[^\d+]/g,"")});
-  if(d.website)c.push({k:"web",label:"Web",text:bare(d.website),href:url(d.website)});
-  if(d.instagram){const u=d.instagram.replace(/^@/,"");c.push({k:"insta",label:"Instagram",text:"@"+u,href:"https://instagram.com/"+u})}
-  if(d.tiktok){const u=d.tiktok.replace(/^@/,"");c.push({k:"tiktok",label:"TikTok",text:"@"+u,href:"https://tiktok.com/@"+u})}
-  if(d.linkedin)c.push({k:"linkedin",label:"LinkedIn",text:bare(d.linkedin),href:url(d.linkedin)});
+  if(d.phone){
+    c.push({k:"phone",label:"Telefon",text:d.phone,href:"tel:"+d.phone.replace(/[^\d+]/g,"")});
+    if(d.whatsapp==="true"){let n=d.phone.replace(/[^\d+]/g,"");
+      n=n.startsWith("+")?n.slice(1):n.startsWith("00")?n.slice(2):n.startsWith("0")?"49"+n.slice(1):n;
+      c.push({k:"whatsapp",label:"WhatsApp",text:"WhatsApp",href:"https://wa.me/"+n,logo:logo("whatsapp.com")})}
+  }
+  if(d.website){const dom=bare(d.website).split("/")[0];c.push({k:"web",label:"Web",text:bare(d.website),href:url(d.website),logo:logo(dom)})}
+  if(d.instagram){const u=d.instagram.replace(/^@/,"");c.push({k:"insta",label:"Instagram",text:"@"+u,href:"https://instagram.com/"+u,logo:logo("instagram.com")})}
+  if(d.tiktok){const u=d.tiktok.replace(/^@/,"");c.push({k:"tiktok",label:"TikTok",text:"@"+u,href:"https://tiktok.com/@"+u,logo:logo("tiktok.com")})}
+  if(d.linkedin)c.push({k:"linkedin",label:"LinkedIn",text:bare(d.linkedin),href:url(d.linkedin),logo:logo("linkedin.com")});
   return c;
 }
 const a=(c,style)=>`<a href="${esc(c.href)}" style="${style}">${esc(c.text)}</a>`;
@@ -134,7 +143,7 @@ const DESIGNS={
 /* Terminal Boot */
 boot:{name:"Terminal Boot",render(d,c){
   let t=1.6,line=(html,extra="")=>{const s=`<span class="tl" style="animation-delay:${t.toFixed(1)}s;${extra}">${html}</span>`;t+=.55;return s};
-  const pad=s=>(s+"      ").slice(0,6).replace(/ /g,"&nbsp;");
+  const pad=s=>(s+"        ").slice(0,8).replace(/ /g,"&nbsp;");
   return `<table cellpadding="0" cellspacing="0" border="0" width="560" style="width:560px;background:#070908;border-radius:10px;font-family:'Courier New',Consolas,monospace;font-size:13px;color:#3dff8a">
   <tr><td style="padding:11px 16px;border-bottom:1px solid #1b211d"><span style="color:#ff5f57">●</span> <span style="color:#febc2e">●</span> <span style="color:#28c840">●</span><span style="color:#5a6a60;font-size:12px">&nbsp; ~/${esc((d.name.split(" ")[0]||"me").toLowerCase())} — zsh</span></td></tr>
   <tr><td style="padding:14px 18px 18px;line-height:1.75">
@@ -194,7 +203,7 @@ status:{name:"Status",render(d,c){
     ${d.title?`<div class="fade" style="font-size:13px;color:#62625e;margin-top:2px;animation-delay:.1s">${esc(d.title)}${d.location?", "+esc(d.location):""}</div>`:""}
     ${d.status?`<div class="fade" style="display:inline-block;margin-top:10px;padding:4px 10px 4px 9px;border:1px solid #d6d6d1;border-radius:20px;font-size:12px;color:#3a3a37;animation-delay:.25s"><span class="dot"></span>&nbsp; ${esc(d.status)}</div>`:""}
     <div class="fade" style="font-size:13px;margin-top:12px;color:#62625e;animation-delay:.4s">
-      ${c.map(x=>a(x,"color:#151515;text-decoration:none")).join('<span style="color:#c2c2bd">&nbsp;&nbsp;/&nbsp;&nbsp;</span>')}
+      ${c.map(x=>(x.logo?`<img src="${esc(x.logo)}" width="13" height="13" alt="" style="width:13px;height:13px;vertical-align:-2px;margin-right:5px;border:0">`:"")+a(x,"color:#151515;text-decoration:none")).join('<span style="color:#c2c2bd">&nbsp;&nbsp;/&nbsp;&nbsp;</span>')}
     </div>
   </td></tr></table>`}},
 
@@ -225,8 +234,9 @@ pass:{name:"Boarding Pass",render(d,c){
 
 /* Slash – Original-Design vom Anfang */
 slash:{name:"Slash",render(d,c){
-  const ICON={mail:["✉",14],phone:["☏",15],web:["◎",14],insta:["IG",11],tiktok:["TT",11],linkedin:["in",12]};
-  const icons=c.map((x,i)=>`<a class="ic" href="${esc(x.href)}" title="${x.label}" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:${ICON[x.k][1]}px;font-weight:bold;${i?"margin-top:6px;":""}animation-delay:${(.3+i*.1).toFixed(1)}s">${ICON[x.k][0]}</a>`).join("");
+  const ICON={mail:["✉",14],phone:["☏",15]};
+  const inner=x=>x.logo?`<img src="${esc(x.logo)}" width="16" height="16" alt="${x.label}" style="display:inline-block;width:16px;height:16px;vertical-align:-3px;border:0">`:ICON[x.k][0];
+  const icons=c.map((x,i)=>`<a class="ic" href="${esc(x.href)}" title="${x.label}" style="width:26px;height:26px;line-height:26px;border-radius:7px;text-align:center;text-decoration:none;color:#14161c;font-size:${x.logo?14:ICON[x.k][1]}px;font-weight:bold;${i?"margin-top:6px;":""}animation-delay:${(.3+i*.1).toFixed(1)}s">${inner(x)}</a>`).join("");
   const lines=c.filter(x=>["mail","phone","web"].includes(x.k)).map(x=>a(x,"color:#5b6070;text-decoration:none").replace("<a ",'<a class="lnk" '));
   return `<table class="sig-card" cellpadding="0" cellspacing="0" border="0" width="560"
   style="width:560px;font-family:Arial,Helvetica,sans-serif;color:#14161c;background:#ffffff;border:1px solid #d9dce3;border-radius:14px;border-collapse:separate;box-shadow:0 10px 30px rgba(20,22,28,.08)">
@@ -262,7 +272,10 @@ function render(){
   tabs.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.id===d.design));
 }
 for(const k in DEFAULTS){if(k==="design")continue;
-  const el=document.getElementById(k);el.value=data[k];
+  const el=document.getElementById(k);
+  if(el.type==="checkbox"){el.checked=data[k]===true||data[k]==="true";
+    el.addEventListener("change",()=>{data[k]=el.checked;save();render()});continue}
+  el.value=data[k];
   el.addEventListener("input",()=>{data[k]=el.value;save();render()});
 }
 render();
